@@ -91,7 +91,7 @@ html,body{height:100%;background:var(--ink);color:var(--text);font-family:system
     <div class="slabel">Display</div>
     <div class="ctrls">
       <div class="crow">Wireframe<label class="toggle"><input type="checkbox" id="wireT" checked><span class="track"></span></label></div>
-      <div class="crow">Solid fill<label class="toggle"><input type="checkbox" id="solidT"><span class="track"></span></label></div>
+      <div class="crow">Solid fill<label class="toggle"><input type="checkbox" id="solidT" checked><span class="track"></span></label></div>
       <div class="crow">Auto-rotate<label class="toggle"><input type="checkbox" id="rotT" checked><span class="track"></span></label></div>
     </div>
   </div>
@@ -237,7 +237,7 @@ function buildScene(verts,indices){
   scene.add(wireMesh);
 
   solidMesh=new THREE.Mesh(geo,new THREE.MeshPhongMaterial({color:0x0e1a40,emissive:0x081428,transparent:true,opacity:0.22,side:THREE.DoubleSide,depthWrite:false}));
-  solidMesh.visible=false;
+  solidMesh.visible=true;
   scene.add(solidMesh);
   scene.add(new THREE.AmbientLight(0x3060a0,0.5));
   const pt=new THREE.PointLight(0x3db8ff,0.7,8);pt.position.set(0,2,2);scene.add(pt);
@@ -362,7 +362,7 @@ function updBtn(){
 
 document.getElementById('play-btn').addEventListener('click',()=>{
   if(!audioBuf)return;playing=!playing;updBtn();
-  if(playing)playFrom((document.getElementById('progress').value/1000)*DURATION);
+  if(playing){autoRotate=false;document.getElementById('rotT').checked=false;playFrom((document.getElementById('progress').value/1000)*DURATION);}
   else{const p=curPos();stopAudio();playOff=p;}
 });
 document.getElementById('progress').addEventListener('input',e=>{
