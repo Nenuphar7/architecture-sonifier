@@ -265,63 +265,145 @@ function buildScene(verts,indices){
 
   // Profile — true cross-section as THICK ribbon (quads in the Y-Z plane)
   const profGeo=new THREE.BufferGeometry();
-  const maxSeg=2500;               // segments
+  const maxSeg=4000;               // segments
   profGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(maxSeg*6*3),3)); // 2 tris/seg
   profGeo.setDrawRange(0,0);
   profileLines=new THREE.Mesh(profGeo,new THREE.MeshBasicMaterial({
-    color:0xffae42,transparent:true,opacity:1.0,side:THREE.DoubleSide,
+    color:0xffffff,transparent:true,opacity:1.0,side:THREE.DoubleSide,
     blending:THREE.AdditiveBlending,depthWrite:false,depthTest:false
   }));
   profileLines.renderOrder=999;
   scene.add(profileLines);
 
-  // Soft outer glow — same ribbon, fatter & dimmer, drawn behind
+  // Soft outer glow — same ribbon, fatter & dimmer, turquoise
   const glowGeo=new THREE.BufferGeometry();
   glowGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(maxSeg*6*3),3));
   glowGeo.setDrawRange(0,0);
   profileGlow=new THREE.Mesh(glowGeo,new THREE.MeshBasicMaterial({
-    color:0xff8c2a,transparent:true,opacity:0.35,side:THREE.DoubleSide,
+    color:0x2ff0e0,transparent:true,opacity:0.45,side:THREE.DoubleSide,
     blending:THREE.AdditiveBlending,depthWrite:false,depthTest:false
   }));
   profileGlow.renderOrder=998;
   scene.add(profileGlow);
 }
 
-// Build a thick quad for one segment (in YZ plane at x) into target array.
-// Returns new write offset.
-function emitBar(arr,o,x,y0,z0,y1,z1,w){
-  let dy=y1-y0, dz=z1-z0;
-  const len=Math.hypot(dy,dz)||1e-6;
-  // perpendicular in YZ
-  const ny=-dz/len*w, nz=dy/len*w;
-  // also extend ends slightly so neighbouring bars overlap → joined look
-  const ey=dy/len*w, ez=dz/len*w;
-  const Ay=y0-ey+ny, Az=z0-ez+nz;
-  const By=y1+ey+ny, Bz=z1+ez+nz;
-  const Cy=y1+ey-ny, Cz=z1+ez-nz;
-  const Dy=y0-ey-ny, Dz=z0-ez-nz;
-  // tri 1: A,B,C
-  arr[o++]=x;arr[o++]=Ay;arr[o++]=Az;
-  arr[o++]=x;arr[o++]=By;arr[o++]=Bz;
-  arr[o++]=x;arr[o++]=Cy;arr[o++]=Cz;
-  // tri 2: A,C,D
-  arr[o++]=x;arr[o++]=Ay;arr[o++]=Az;
-  arr[o++]=x;arr[o++]=Cy;arr[o++]=Cz;
-  arr[o++]=x;arr[o++]=Dy;arr[o++]=Dz;
+// Build a continuous mitered ribbon along a 2D polyline (points in YZ at x).
+// pts: flat array [y0,z0,y1,z1,...]; returns new write offset.
+function emitRibbon(arr,o,x,pts,w,closed,maxFloats){
+  const n=pts.length/2;
+  if(n<2)return o;
+  // precompute per-vertex normals (miter)
+  const nx=new Float32Array(n), nz=new Float32Array(n);
+  for(let i=0;i<n;i++){
+    // direction of incoming and outgoing segments
+    let inY=0,inZ=0,outY=0,outZ=0;
+    if(i>0||closed){
+      const pi=(i-1+n)%n;
+      inY=pts[i*2]-pts[pi*2]; inZ=pts[i*2+1]-pts[pi*2+1];
+      const l=Math.hypot(inY,inZ)||1e-6; inY/=l; inZ/=l;
+    }
+    if(i<n-1||closed){
+      const ni=(i+1)%n;
+      outY=pts[ni*2]-pts[i*2]; outZ=pts[ni*2+1]-pts[i*2+1];
+      const l=Math.hypot(outY,outZ)||1e-6; outY/=l; outZ/=l;
+    }
+    // average tangent
+    let ty=inY+outY, tz=inZ+outZ;
+    const tl=Math.hypot(ty,tz);
+    if(tl<1e-4){ty=outY||inY; tz=outZ||inZ;} else {ty/=tl;tz/=tl;}
+    // normal = perp of tangent
+    let mnx=-tz, mnz=ty;
+    // miter length compensation
+    let miter=1;
+    if(tl>=1e-4){
+      const ref=(i<n-1||closed)?[outY,outZ]:[inY,inZ];
+      const cosA=mnx*(-ref[1])+mnz*(ref[0]);
+      miter=Math.min(2.5,1/Math.max(0.4,Math.abs(cosA)));
+    }
+    nx[i]=mnx*w*miter; nz[i]=mnz*w*miter;
+  }
+  const segCount=closed?n:n-1;
+  for(let i=0;i<segCount;i++){
+    const j=(i+1)%n;
+    if(o+18>maxFloats)break;
+    const Ly0=pts[i*2]+nx[i], Lz0=pts[i*2+1]+nz[i];
+    const Ry0=pts[i*2]-nx[i], Rz0=pts[i*2+1]-nz[i];
+    const Ly1=pts[j*2]+nx[j], Lz1=pts[j*2+1]+nz[j];
+    const Ry1=pts[j*2]-nx[j], Rz1=pts[j*2+1]-nz[j];
+    arr[o++]=x;arr[o++]=Ly0;arr[o++]=Lz0;
+    arr[o++]=x;arr[o++]=Ly1;arr[o++]=Lz1;
+    arr[o++]=x;arr[o++]=Ry1;arr[o++]=Rz1;
+    arr[o++]=x;arr[o++]=Ly0;arr[o++]=Lz0;
+    arr[o++]=x;arr[o++]=Ry1;arr[o++]=Rz1;
+    arr[o++]=x;arr[o++]=Ry0;arr[o++]=Rz0;
+  }
   return o;
 }
 
-// True cross-section: intersect plane x=scanX with every triangle.
+// Chain raw cross-section segments into continuous polylines by shared endpoints.
+function chainSegments(segs){
+  const Q=1e4; // quantization for endpoint matching
+  const key=(y,z)=>Math.round(y*Q)+','+Math.round(z*Q);
+  const adj=new Map(); // key -> [{seg,end}]
+  for(let i=0;i<segs.length;i++){
+    const s=segs[i];
+    for(const e of [0,1]){
+      const k=e===0?key(s[0],s[1]):key(s[2],s[3]);
+      if(!adj.has(k))adj.set(k,[]);
+      adj.get(k).push({seg:i,end:e});
+    }
+  }
+  const used=new Uint8Array(segs.length);
+  const polylines=[];
+  for(let i=0;i<segs.length;i++){
+    if(used[i])continue;
+    used[i]=1;
+    const s=segs[i];
+    // start a polyline; we walk forward from end1, then backward from end0
+    let pts=[s[0],s[1],s[2],s[3]];
+    // walk forward
+    let curKey=key(s[2],s[3]);
+    while(true){
+      const cands=adj.get(curKey);
+      if(!cands)break;
+      let nxt=-1,nend=0;
+      for(const c of cands){if(!used[c.seg]){nxt=c.seg;nend=c.end;break;}}
+      if(nxt<0)break;
+      used[nxt]=1;
+      const ns=segs[nxt];
+      if(nend===0){pts.push(ns[2],ns[3]);curKey=key(ns[2],ns[3]);}
+      else        {pts.push(ns[0],ns[1]);curKey=key(ns[0],ns[1]);}
+    }
+    // walk backward
+    curKey=key(s[0],s[1]);
+    while(true){
+      const cands=adj.get(curKey);
+      if(!cands)break;
+      let nxt=-1,nend=0;
+      for(const c of cands){if(!used[c.seg]){nxt=c.seg;nend=c.end;break;}}
+      if(nxt<0)break;
+      used[nxt]=1;
+      const ns=segs[nxt];
+      if(nend===0){pts.unshift(ns[2],ns[3]);curKey=key(ns[2],ns[3]);}
+      else        {pts.unshift(ns[0],ns[1]);curKey=key(ns[0],ns[1]);}
+    }
+    polylines.push(pts);
+  }
+  return polylines;
+}
+
+// True cross-section: intersect plane x=scanX with every triangle, then chain.
 function updateProfile(scanX){
   if(!cachedVerts||!cachedIdx)return;
   const V=cachedVerts,I=cachedIdx;
   const arr=profileLines.geometry.attributes.position.array;
   const garr=profileGlow.geometry.attributes.position.array;
   const maxFloats=arr.length;
-  const W=0.012;       // core half-thickness
-  const GW=0.028;      // glow half-thickness
-  let o=0, go=0;
+  const W=0.013;   // core half-thickness
+  const GW=0.032;  // glow half-thickness
+  const MINLEN=0.004; // drop micro-segments (noise)
 
+  const segs=[];
   for(let t=0;t<I.length;t+=3){
     const a=I[t]*3,b=I[t+1]*3,c=I[t+2]*3;
     const ax=V[a],ay=V[a+1],az=V[a+2];
@@ -329,13 +411,20 @@ function updateProfile(scanX){
     const cx=V[c],cy=V[c+1],cz=V[c+2];
     const da=ax-scanX, db=bx-scanX, dc=cx-scanX;
     const hits=[];
-    if((da<0)!==(db<0)){const s=da/(da-db);hits.push([ay+s*(by-ay),az+s*(bz-az)]);}
-    if((db<0)!==(dc<0)){const s=db/(db-dc);hits.push([by+s*(cy-by),bz+s*(cz-bz)]);}
-    if((dc<0)!==(da<0)){const s=dc/(dc-da);hits.push([cy+s*(ay-cy),cz+s*(az-cz)]);}
-    if(hits.length===2 && o+18<=maxFloats){
-      o =emitBar(arr, o, scanX,hits[0][0],hits[0][1],hits[1][0],hits[1][1],W);
-      go=emitBar(garr,go,scanX,hits[0][0],hits[0][1],hits[1][0],hits[1][1],GW);
+    if((da<0)!==(db<0)){const s=da/(da-db);hits.push(ay+s*(by-ay),az+s*(bz-az));}
+    if((db<0)!==(dc<0)){const s=db/(db-dc);hits.push(by+s*(cy-by),bz+s*(cz-bz));}
+    if((dc<0)!==(da<0)){const s=dc/(dc-da);hits.push(cy+s*(ay-cy),cz+s*(az-cz));}
+    if(hits.length===4){
+      const dy=hits[2]-hits[0], dz=hits[3]-hits[1];
+      if(Math.hypot(dy,dz)>=MINLEN) segs.push(hits);
     }
+  }
+
+  const polylines=chainSegments(segs);
+  let o=0,go=0;
+  for(const pl of polylines){
+    o =emitRibbon(arr, o, scanX,pl,W, false,maxFloats);
+    go=emitRibbon(garr,go,scanX,pl,GW,false,maxFloats);
     if(o+18>maxFloats)break;
   }
   profileLines.geometry.setDrawRange(0,o/3);
