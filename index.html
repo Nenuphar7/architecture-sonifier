@@ -293,10 +293,13 @@ function buildScene(verts,indices){
       vec4 cs=projectionMatrix*modelViewMatrix*vec4(aStart,1.0);
       vec4 ce=projectionMatrix*modelViewMatrix*vec4(aEnd,1.0);
       vec2 ns=cs.xy/cs.w, ne=ce.xy/ce.w;
-      vec2 dir=normalize((ne-ns)*uRes);
+      vec2 dirPx=(ne-ns)*uRes;
+      float L=length(dirPx);
+      vec2 dir = L>1e-6 ? dirPx/L : vec2(1.0,0.0);
       vec2 nrm=vec2(-dir.y,dir.x);
       vec4 clip=mix(cs,ce,aWhich);
-      clip.xy += nrm*aSide*(uHalfPx/uRes)*clip.w;
+      vec2 ndcPerPx=2.0/uRes;
+      clip.xy += nrm*aSide*uHalfPx*ndcPerPx*clip.w;
       gl_Position=clip;
     }`;
   const FSH=`
@@ -586,7 +589,9 @@ async function init(){
     setStatus('building mesh...');
     await new Promise(r=>setTimeout(r,30));
     buildScene(verts,indices);
-    setScanX(-1.6);
+    setScanX(0.0);
+    document.getElementById('progress').value=500;
+    document.getElementById('cur').textContent='4.0 s';
     await buildAudio(verts);
     document.getElementById('loading').classList.add('hidden');
     setTimeout(()=>{document.getElementById('loading').style.display='none';},800);
