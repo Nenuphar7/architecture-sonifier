@@ -110,11 +110,8 @@ html,body{height:100%;background:var(--ink);color:var(--text);font-family:system
     <div class="llbl">Initializing scan</div>
     <div id="lst">parsing geometry...</div>
   </div>
-  <!-- Big play overlay shown after audio ready -->
-  <div id="play-overlay" style="display:none;position:absolute;inset:0;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;z-index:5">
-    <button id="big-play" style="width:80px;height:80px;border-radius:50%;border:2px solid #3db8ff;background:rgba(61,184,255,.15);color:#3db8ff;font-size:28px;cursor:pointer;pointer-events:all;box-shadow:0 0 40px rgba(61,184,255,.3);transition:all .25s;display:flex;align-items:center;justify-content:center">&#9654;</button>
-    <div style="margin-top:14px;font-family:monospace;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#3db8ff;opacity:.6">play scan</div>
-  </div>
+  <!-- Persistent corner play/pause button -->
+  <button id="big-play" style="position:absolute;right:24px;bottom:24px;width:60px;height:60px;border-radius:50%;border:2px solid #3db8ff;background:rgba(61,184,255,.15);color:#3db8ff;font-size:22px;cursor:pointer;z-index:6;box-shadow:0 0 28px rgba(61,184,255,.3);transition:all .2s;display:flex;align-items:center;justify-content:center">&#9654;</button>
 </div>
 
 <div id="transport">
@@ -363,6 +360,20 @@ function updBtn(){
   const b=document.getElementById('play-btn');
   if(playing){b.innerHTML='&#9646;&#9646;';b.classList.add('playing');}
   else{b.innerHTML='&#9654;';b.classList.remove('playing');}
+  const big=document.getElementById('big-play');
+  if(big){
+    if(playing){
+      big.innerHTML='&#9646;&#9646;';
+      big.style.borderColor='#ff8c42';big.style.color='#ff8c42';
+      big.style.background='rgba(255,140,66,.15)';
+      big.style.boxShadow='0 0 28px rgba(255,140,66,.3)';
+    }else{
+      big.innerHTML='&#9654;';
+      big.style.borderColor='#3db8ff';big.style.color='#3db8ff';
+      big.style.background='rgba(61,184,255,.15)';
+      big.style.boxShadow='0 0 28px rgba(61,184,255,.3)';
+    }
+  }
 }
 
 document.getElementById('play-btn').addEventListener('click',()=>{
@@ -434,14 +445,9 @@ async function init(){
     setScanX(-1.6,verts);
     await buildAudio(verts);
     document.getElementById('loading').classList.add('hidden');
-    setTimeout(()=>{
-      document.getElementById('loading').style.display='none';
-      const ov=document.getElementById('play-overlay');
-      ov.style.display='flex';
-    },800);
-    // Big play button
+    setTimeout(()=>{document.getElementById('loading').style.display='none';},800);
+    // Corner play/pause toggle — never disappears
     document.getElementById('big-play').addEventListener('click',()=>{
-      document.getElementById('play-overlay').style.display='none';
       document.getElementById('play-btn').click();
     });
     requestAnimationFrame(animate);
