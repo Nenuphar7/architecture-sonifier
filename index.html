@@ -340,93 +340,65 @@ function emitRibbon(arr,o,x,pts,w,closed,maxFloats){
   return o;
 }
 
-// Chain raw cross-section segments into continuous polylines by shared endpoints.
-function chainSegments(segs){
-  const Q=1e4; // quantization for endpoint matching
-  const key=(y,z)=>Math.round(y*Q)+','+Math.round(z*Q);
-  const adj=new Map(); // key -> [{seg,end}]
-  for(let i=0;i<segs.length;i++){
-    const s=segs[i];
-    for(const e of [0,1]){
-      const k=e===0?key(s[0],s[1]):key(s[2],s[3]);
-      if(!adj.has(k))adj.set(k,[]);
-      adj.get(k).push({seg:i,end:e});
-    }
-  }
-  const used=new Uint8Array(segs.length);
-  const polylines=[];
-  for(let i=0;i<segs.length;i++){
-    if(used[i])continue;
-    used[i]=1;
-    const s=segs[i];
-    // start a polyline; we walk forward from end1, then backward from end0
-    let pts=[s[0],s[1],s[2],s[3]];
-    // walk forward
-    let curKey=key(s[2],s[3]);
-    while(true){
-      const cands=adj.get(curKey);
-      if(!cands)break;
-      let nxt=-1,nend=0;
-      for(const c of cands){if(!used[c.seg]){nxt=c.seg;nend=c.end;break;}}
-      if(nxt<0)break;
-      used[nxt]=1;
-      const ns=segs[nxt];
-      if(nend===0){pts.push(ns[2],ns[3]);curKey=key(ns[2],ns[3]);}
-      else        {pts.push(ns[0],ns[1]);curKey=key(ns[0],ns[1]);}
-    }
-    // walk backward
-    curKey=key(s[0],s[1]);
-    while(true){
-      const cands=adj.get(curKey);
-      if(!cands)break;
-      let nxt=-1,nend=0;
-      for(const c of cands){if(!used[c.seg]){nxt=c.seg;nend=c.end;break;}}
-      if(nxt<0)break;
-      used[nxt]=1;
-      const ns=segs[nxt];
-      if(nend===0){pts.unshift(ns[2],ns[3]);curKey=key(ns[2],ns[3]);}
-      else        {pts.unshift(ns[0],ns[1]);curKey=key(ns[0],ns[1]);}
-    }
-    polylines.push(pts);
-  }
-  return polylines;
-}
-
-// True cross-section: intersect plane x=scanX with every triangle, then chain.
+// Cross-section UPPER SILHOUETTE: at plane x=scanX, for each depth (Z) bucket
+// take the highest surface point (max Y). Connect into one continuous skyline.
 function updateProfile(scanX){
   if(!cachedVerts||!cachedIdx)return;
   const V=cachedVerts,I=cachedIdx;
   const arr=profileLines.geometry.attributes.position.array;
   const garr=profileGlow.geometry.attributes.position.array;
   const maxFloats=arr.length;
-  const W=0.013;   // core half-thickness
-  const GW=0.032;  // glow half-thickness
-  const MINLEN=0.004; // drop micro-segments (noise)
+  const W=0.013, GW=0.032;
 
-  const segs=[];
+  const NB=180, ZMIN=-1.02, ZMAX=1.02, span=ZMAX-ZMIN;
+  const topY=new Float32Array(NB).fill(-Infinity);
+
+  // collect hit points, keep the max Y per Z bucket
   for(let t=0;t<I.length;t+=3){
     const a=I[t]*3,b=I[t+1]*3,c=I[t+2]*3;
     const ax=V[a],ay=V[a+1],az=V[a+2];
     const bx=V[b],by=V[b+1],bz=V[b+2];
     const cx=V[c],cy=V[c+1],cz=V[c+2];
     const da=ax-scanX, db=bx-scanX, dc=cx-scanX;
-    const hits=[];
-    if((da<0)!==(db<0)){const s=da/(da-db);hits.push(ay+s*(by-ay),az+s*(bz-az));}
-    if((db<0)!==(dc<0)){const s=db/(db-dc);hits.push(by+s*(cy-by),bz+s*(cz-bz));}
-    if((dc<0)!==(da<0)){const s=dc/(dc-da);hits.push(cy+s*(ay-cy),cz+s*(az-cz));}
-    if(hits.length===4){
-      const dy=hits[2]-hits[0], dz=hits[3]-hits[1];
-      if(Math.hypot(dy,dz)>=MINLEN) segs.push(hits);
+    const hy=[],hz=[];
+    if((da<0)!==(db<0)){const s=da/(da-db);hy.push(ay+s*(by-ay));hz.push(az+s*(bz-az));}
+    if((db<0)!==(dc<0)){const s=db/(db-dc);hy.push(by+s*(cy-by));hz.push(bz+s*(cz-bz));}
+    if((dc<0)!==(da<0)){const s=dc/(dc-da);hy.push(cy+s*(ay-cy));hz.push(cz+s*(az-cz));}
+    if(hy.length===2){
+      // sample along the segment so thin slabs still fill buckets
+      const steps=6;
+      for(let k=0;k<=steps;k++){
+        const f=k/steps;
+        const y=hy[0]+f*(hy[1]-hy[0]);
+        const z=hz[0]+f*(hz[1]-hz[0]);
+        let bin=Math.floor((z-ZMIN)/span*NB);
+        if(bin<0)bin=0; else if(bin>=NB)bin=NB-1;
+        if(y>topY[bin])topY[bin]=y;
+      }
     }
   }
 
-  const polylines=chainSegments(segs);
+  // build polylines, splitting on empty buckets (gaps between separate masses)
   let o=0,go=0;
-  for(const pl of polylines){
-    o =emitRibbon(arr, o, scanX,pl,W, false,maxFloats);
-    go=emitRibbon(garr,go,scanX,pl,GW,false,maxFloats);
+  let run=[];
+  const flush=()=>{
+    if(run.length>=4){ // at least 2 points
+      o =emitRibbon(arr, o, scanX,run,W, false,maxFloats);
+      go=emitRibbon(garr,go,scanX,run,GW,false,maxFloats);
+    }
+    run=[];
+  };
+  for(let bin=0;bin<NB;bin++){
+    if(topY[bin]>-Infinity){
+      const zc=ZMIN+(bin+0.5)/NB*span;
+      run.push(topY[bin],zc); // [y,z] pair
+    }else{
+      flush();
+    }
     if(o+18>maxFloats)break;
   }
+  flush();
+
   profileLines.geometry.setDrawRange(0,o/3);
   profileLines.geometry.attributes.position.needsUpdate=true;
   profileGlow.geometry.setDrawRange(0,go/3);
