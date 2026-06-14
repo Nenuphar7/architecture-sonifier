@@ -340,65 +340,120 @@ function emitRibbon(arr,o,x,pts,w,closed,maxFloats){
   return o;
 }
 
-// Cross-section UPPER SILHOUETTE: at plane x=scanX, for each depth (Z) bucket
-// take the highest surface point (max Y). Connect into one continuous skyline.
+// Chain raw cross-section segments into continuous polylines by shared endpoints.
+function chainSegments(segs){
+  const Q=1e4;
+  const key=(y,z)=>Math.round(y*Q)+','+Math.round(z*Q);
+  const adj=new Map();
+  for(let i=0;i<segs.length;i++){
+    const s=segs[i];
+    for(const e of [0,1]){
+      const k=e===0?key(s[0],s[1]):key(s[2],s[3]);
+      if(!adj.has(k))adj.set(k,[]);
+      adj.get(k).push({seg:i,end:e});
+    }
+  }
+  const used=new Uint8Array(segs.length);
+  const polylines=[];
+  for(let i=0;i<segs.length;i++){
+    if(used[i])continue;
+    used[i]=1;
+    const s=segs[i];
+    let pts=[s[0],s[1],s[2],s[3]];
+    let curKey=key(s[2],s[3]);
+    while(true){
+      const cands=adj.get(curKey);if(!cands)break;
+      let nxt=-1,nend=0;
+      for(const c of cands){if(!used[c.seg]){nxt=c.seg;nend=c.end;break;}}
+      if(nxt<0)break;used[nxt]=1;const ns=segs[nxt];
+      if(nend===0){pts.push(ns[2],ns[3]);curKey=key(ns[2],ns[3]);}
+      else        {pts.push(ns[0],ns[1]);curKey=key(ns[0],ns[1]);}
+    }
+    curKey=key(s[0],s[1]);
+    while(true){
+      const cands=adj.get(curKey);if(!cands)break;
+      let nxt=-1,nend=0;
+      for(const c of cands){if(!used[c.seg]){nxt=c.seg;nend=c.end;break;}}
+      if(nxt<0)break;used[nxt]=1;const ns=segs[nxt];
+      if(nend===0){pts.unshift(ns[2],ns[3]);curKey=key(ns[2],ns[3]);}
+      else        {pts.unshift(ns[0],ns[1]);curKey=key(ns[0],ns[1]);}
+    }
+    polylines.push(pts);
+  }
+  return polylines;
+}
+
+// True cross-section + subtract platform-top edge under the building footprint.
 function updateProfile(scanX){
   if(!cachedVerts||!cachedIdx)return;
   const V=cachedVerts,I=cachedIdx;
   const arr=profileLines.geometry.attributes.position.array;
   const garr=profileGlow.geometry.attributes.position.array;
   const maxFloats=arr.length;
-  const W=0.013, GW=0.032;
+  const W=0.013, GW=0.032, MINLEN=0.004;
 
-  const NB=180, ZMIN=-1.02, ZMAX=1.02, span=ZMAX-ZMIN;
-  const topY=new Float32Array(NB).fill(-Infinity);
-
-  // collect hit points, keep the max Y per Z bucket
+  // pass 1: collect all segments + find vertical extent
+  const raw=[];
+  let yMin=Infinity;
   for(let t=0;t<I.length;t+=3){
     const a=I[t]*3,b=I[t+1]*3,c=I[t+2]*3;
     const ax=V[a],ay=V[a+1],az=V[a+2];
     const bx=V[b],by=V[b+1],bz=V[b+2];
     const cx=V[c],cy=V[c+1],cz=V[c+2];
     const da=ax-scanX, db=bx-scanX, dc=cx-scanX;
-    const hy=[],hz=[];
-    if((da<0)!==(db<0)){const s=da/(da-db);hy.push(ay+s*(by-ay));hz.push(az+s*(bz-az));}
-    if((db<0)!==(dc<0)){const s=db/(db-dc);hy.push(by+s*(cy-by));hz.push(bz+s*(cz-bz));}
-    if((dc<0)!==(da<0)){const s=dc/(dc-da);hy.push(cy+s*(ay-cy));hz.push(cz+s*(az-cz));}
-    if(hy.length===2){
-      // sample along the segment so thin slabs still fill buckets
-      const steps=6;
-      for(let k=0;k<=steps;k++){
-        const f=k/steps;
-        const y=hy[0]+f*(hy[1]-hy[0]);
-        const z=hz[0]+f*(hz[1]-hz[0]);
-        let bin=Math.floor((z-ZMIN)/span*NB);
-        if(bin<0)bin=0; else if(bin>=NB)bin=NB-1;
-        if(y>topY[bin])topY[bin]=y;
+    const hits=[];
+    if((da<0)!==(db<0)){const s=da/(da-db);hits.push(ay+s*(by-ay),az+s*(bz-az));}
+    if((db<0)!==(dc<0)){const s=db/(db-dc);hits.push(by+s*(cy-by),bz+s*(cz-bz));}
+    if((dc<0)!==(da<0)){const s=dc/(dc-da);hits.push(cy+s*(ay-cy),cz+s*(az-cz));}
+    if(hits.length===4){
+      const dy=hits[2]-hits[0], dz=hits[3]-hits[1];
+      if(Math.hypot(dy,dz)>=MINLEN){
+        raw.push(hits);
+        if(hits[0]<yMin)yMin=hits[0];
+        if(hits[2]<yMin)yMin=hits[2];
       }
     }
   }
+  if(raw.length===0){
+    profileLines.geometry.setDrawRange(0,0);
+    profileGlow.geometry.setDrawRange(0,0);
+    return;
+  }
 
-  // build polylines, splitting on empty buckets (gaps between separate masses)
+  // platform = thin slab at the bottom. Its top edge ≈ yMin + slab thickness.
+  const SLAB=0.10;                 // platform thickness (normalised)
+  const baseCut=yMin+SLAB;         // anything below this is "platform"
+  // building footprint in Z = span of points ABOVE the platform
+  let zbMin=Infinity, zbMax=-Infinity;
+  for(const h of raw){
+    if(h[0]>baseCut){ if(h[1]<zbMin)zbMin=h[1]; if(h[1]>zbMax)zbMax=h[1]; }
+    if(h[2]>baseCut){ if(h[3]<zbMin)zbMin=h[3]; if(h[3]>zbMax)zbMax=h[3]; }
+  }
+  const hasBuilding=zbMax>zbMin;
+  const platTopY=yMin+SLAB*0.82;   // approx height of platform's upper face
+
+  // pass 2: keep segments, but drop the platform's TOP edge where the
+  // building sits above it (subtract building footprint from the base).
+  const segs=[];
+  for(const h of raw){
+    const dy=Math.abs(h[2]-h[0]);
+    const dz=Math.abs(h[3]-h[1]);
+    const midY=(h[0]+h[2])*0.5;
+    const midZ=(h[1]+h[3])*0.5;
+    const nearHoriz=dy<0.05 && dz>0.02;            // near-horizontal run
+    const isPlatTop=nearHoriz && midY>platTopY-0.05 && midY<baseCut+0.02;
+    const underBuilding=hasBuilding && midZ>zbMin+0.02 && midZ<zbMax-0.02;
+    if(isPlatTop && underBuilding) continue;       // subtract
+    segs.push(h);
+  }
+
+  const polylines=chainSegments(segs);
   let o=0,go=0;
-  let run=[];
-  const flush=()=>{
-    if(run.length>=4){ // at least 2 points
-      o =emitRibbon(arr, o, scanX,run,W, false,maxFloats);
-      go=emitRibbon(garr,go,scanX,run,GW,false,maxFloats);
-    }
-    run=[];
-  };
-  for(let bin=0;bin<NB;bin++){
-    if(topY[bin]>-Infinity){
-      const zc=ZMIN+(bin+0.5)/NB*span;
-      run.push(topY[bin],zc); // [y,z] pair
-    }else{
-      flush();
-    }
+  for(const pl of polylines){
+    o =emitRibbon(arr, o, scanX,pl,W, false,maxFloats);
+    go=emitRibbon(garr,go,scanX,pl,GW,false,maxFloats);
     if(o+18>maxFloats)break;
   }
-  flush();
-
   profileLines.geometry.setDrawRange(0,o/3);
   profileLines.geometry.attributes.position.needsUpdate=true;
   profileGlow.geometry.setDrawRange(0,go/3);
