@@ -173,7 +173,7 @@ function decodeF32(b){const bin=atob(b),buf=new ArrayBuffer(bin.length),u8=new U
 function decodeU32(b){const bin=atob(b),buf=new ArrayBuffer(bin.length),u8=new Uint8Array(buf);for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);return new Uint32Array(buf)}
 
 let scene,camera,renderer,ptsMesh,scanPlane,scanU;
-let wireMesh,solidMesh,profileLines,cachedVerts=null,cachedIdx=null;
+let wireMesh,solidMesh,profileLines,profileGlow,cachedVerts=null,cachedIdx=null;
 let autoRotate=true,isDragging=false,prev={x:0,y:0};
 let sph={theta:0.22,phi:1.05,r:3.8};
 
@@ -263,49 +263,85 @@ function buildScene(verts,indices){
   scanPlane=sp;
   scene.add(sp);
 
-  // Profile — true cross-section outline (line segments from plane∩triangles)
+  // Profile — true cross-section as THICK ribbon (quads in the Y-Z plane)
   const profGeo=new THREE.BufferGeometry();
-  const maxSeg=4000; // up to 2000 segments
-  profGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(maxSeg*3),3));
+  const maxSeg=2500;               // segments
+  profGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(maxSeg*6*3),3)); // 2 tris/seg
   profGeo.setDrawRange(0,0);
-  profileLines=new THREE.LineSegments(profGeo,new THREE.LineBasicMaterial({
-    color:0xff8c2a,transparent:true,opacity:0.95,blending:THREE.AdditiveBlending,depthWrite:false
+  profileLines=new THREE.Mesh(profGeo,new THREE.MeshBasicMaterial({
+    color:0xffae42,transparent:true,opacity:1.0,side:THREE.DoubleSide,
+    blending:THREE.AdditiveBlending,depthWrite:false,depthTest:false
   }));
+  profileLines.renderOrder=999;
   scene.add(profileLines);
+
+  // Soft outer glow — same ribbon, fatter & dimmer, drawn behind
+  const glowGeo=new THREE.BufferGeometry();
+  glowGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(maxSeg*6*3),3));
+  glowGeo.setDrawRange(0,0);
+  profileGlow=new THREE.Mesh(glowGeo,new THREE.MeshBasicMaterial({
+    color:0xff8c2a,transparent:true,opacity:0.35,side:THREE.DoubleSide,
+    blending:THREE.AdditiveBlending,depthWrite:false,depthTest:false
+  }));
+  profileGlow.renderOrder=998;
+  scene.add(profileGlow);
+}
+
+// Build a thick quad for one segment (in YZ plane at x) into target array.
+// Returns new write offset.
+function emitBar(arr,o,x,y0,z0,y1,z1,w){
+  let dy=y1-y0, dz=z1-z0;
+  const len=Math.hypot(dy,dz)||1e-6;
+  // perpendicular in YZ
+  const ny=-dz/len*w, nz=dy/len*w;
+  // also extend ends slightly so neighbouring bars overlap → joined look
+  const ey=dy/len*w, ez=dz/len*w;
+  const Ay=y0-ey+ny, Az=z0-ez+nz;
+  const By=y1+ey+ny, Bz=z1+ez+nz;
+  const Cy=y1+ey-ny, Cz=z1+ez-nz;
+  const Dy=y0-ey-ny, Dz=z0-ez-nz;
+  // tri 1: A,B,C
+  arr[o++]=x;arr[o++]=Ay;arr[o++]=Az;
+  arr[o++]=x;arr[o++]=By;arr[o++]=Bz;
+  arr[o++]=x;arr[o++]=Cy;arr[o++]=Cz;
+  // tri 2: A,C,D
+  arr[o++]=x;arr[o++]=Ay;arr[o++]=Az;
+  arr[o++]=x;arr[o++]=Cy;arr[o++]=Cz;
+  arr[o++]=x;arr[o++]=Dy;arr[o++]=Dz;
+  return o;
 }
 
 // True cross-section: intersect plane x=scanX with every triangle.
-// Each crossed triangle contributes one line segment (2 edge-intersection points).
 function updateProfile(scanX){
   if(!cachedVerts||!cachedIdx)return;
   const V=cachedVerts,I=cachedIdx;
   const arr=profileLines.geometry.attributes.position.array;
-  const maxPts=arr.length/3;
-  let p=0; // point counter
+  const garr=profileGlow.geometry.attributes.position.array;
+  const maxFloats=arr.length;
+  const W=0.012;       // core half-thickness
+  const GW=0.028;      // glow half-thickness
+  let o=0, go=0;
 
   for(let t=0;t<I.length;t+=3){
     const a=I[t]*3,b=I[t+1]*3,c=I[t+2]*3;
     const ax=V[a],ay=V[a+1],az=V[a+2];
     const bx=V[b],by=V[b+1],bz=V[b+2];
     const cx=V[c],cy=V[c+1],cz=V[c+2];
-    // signed distance to plane (x - scanX)
     const da=ax-scanX, db=bx-scanX, dc=cx-scanX;
-    // find edges that cross the plane (sign change)
     const hits=[];
-    // edge AB
     if((da<0)!==(db<0)){const s=da/(da-db);hits.push([ay+s*(by-ay),az+s*(bz-az)]);}
-    // edge BC
     if((db<0)!==(dc<0)){const s=db/(db-dc);hits.push([by+s*(cy-by),bz+s*(cz-bz)]);}
-    // edge CA
     if((dc<0)!==(da<0)){const s=dc/(dc-da);hits.push([cy+s*(ay-cy),cz+s*(az-cz)]);}
-    if(hits.length===2&&p+2<=maxPts){
-      arr[p*3]=scanX;   arr[p*3+1]=hits[0][0]; arr[p*3+2]=hits[0][1]; p++;
-      arr[p*3]=scanX;   arr[p*3+1]=hits[1][0]; arr[p*3+2]=hits[1][1]; p++;
+    if(hits.length===2 && o+18<=maxFloats){
+      o =emitBar(arr, o, scanX,hits[0][0],hits[0][1],hits[1][0],hits[1][1],W);
+      go=emitBar(garr,go,scanX,hits[0][0],hits[0][1],hits[1][0],hits[1][1],GW);
     }
-    if(p+2>maxPts)break;
+    if(o+18>maxFloats)break;
   }
-  profileLines.geometry.setDrawRange(0,p);
+  profileLines.geometry.setDrawRange(0,o/3);
   profileLines.geometry.attributes.position.needsUpdate=true;
+  profileGlow.geometry.setDrawRange(0,go/3);
+  profileGlow.geometry.attributes.position.needsUpdate=true;
 }
 
 function setScanX(x){
