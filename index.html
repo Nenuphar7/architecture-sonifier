@@ -33,7 +33,8 @@ html,body{height:100%;background:var(--ink);color:var(--text);font-family:system
 .spacer{flex:1}
 .credit{font-size:10px;color:var(--muted);line-height:1.7;font-family:monospace}
 #viewport{position:relative;overflow:hidden}
-#canvas{display:block;width:100%;height:100%}
+#canvas{display:block;width:100%;height:100%;touch-action:none}
+#viewport{touch-action:none}
 
 /* ── Axis labels overlay ── */
 .axlabel{
@@ -584,6 +585,42 @@ document.addEventListener('mousemove',e=>{
 document.addEventListener('mouseup',()=>{isDragging=false;});
 vp.addEventListener('wheel',e=>{
   e.preventDefault();sph.r=Math.max(0.8,Math.min(10,sph.r+e.deltaY*0.005));updateCam();
+},{passive:false});
+
+// ── Touch (iPad / phones): 1 finger rotate, 2 fingers pinch-zoom ──
+let pinchDist=0;
+function touchDist(t){
+  const dx=t[0].clientX-t[1].clientX, dy=t[0].clientY-t[1].clientY;
+  return Math.hypot(dx,dy);
+}
+vp.addEventListener('touchstart',e=>{
+  if(e.touches.length===1){
+    isDragging=true; prev={x:e.touches[0].clientX,y:e.touches[0].clientY};
+  }else if(e.touches.length===2){
+    isDragging=false; pinchDist=touchDist(e.touches);
+  }
+},{passive:false});
+vp.addEventListener('touchmove',e=>{
+  e.preventDefault();
+  if(e.touches.length===1 && isDragging){
+    const x=e.touches[0].clientX, y=e.touches[0].clientY;
+    sph.theta-=(x-prev.x)*0.006;
+    sph.phi=Math.max(0.08,Math.min(Math.PI*0.92,sph.phi+(y-prev.y)*0.006));
+    updateCam(); prev={x,y};
+  }else if(e.touches.length===2){
+    const d=touchDist(e.touches);
+    if(pinchDist>0){
+      sph.r=Math.max(0.8,Math.min(10,sph.r*(pinchDist/d)));
+      updateCam();
+    }
+    pinchDist=d;
+  }
+},{passive:false});
+vp.addEventListener('touchend',e=>{
+  if(e.touches.length===0)isDragging=false;
+  if(e.touches.length<2)pinchDist=0;
+  // if one finger remains after pinch, resume rotate from its position
+  if(e.touches.length===1){isDragging=true;prev={x:e.touches[0].clientX,y:e.touches[0].clientY};}
 },{passive:false});
 
 function animate(){
