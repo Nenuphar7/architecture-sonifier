@@ -513,6 +513,7 @@ async function buildAudio(verts){
 
 function playFrom(off){
   if(!audioBuf)return;
+  if(audioCtx.state==='suspended')audioCtx.resume();
   if(src){try{src.stop()}catch(e){}}
   src=audioCtx.createBufferSource();src.buffer=audioBuf;src.connect(audioCtx.destination);
   const safe=Math.max(0,Math.min(off,DURATION-0.01));
@@ -589,13 +590,15 @@ vp.addEventListener('wheel',e=>{
 },{passive:false});
 
 // ── Touch: 1 finger = rotate, 2 fingers = pinch zoom ──
+// Attach to canvas only so buttons outside the canvas still receive taps
+const cvs=document.getElementById('canvas');
 function touchDist(t){return Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY);}
-vp.addEventListener('touchstart',e=>{
+cvs.addEventListener('touchstart',e=>{
   e.preventDefault();
   if(e.touches.length===1){isDragging=true;prev={x:e.touches[0].clientX,y:e.touches[0].clientY};}
   else if(e.touches.length===2){isDragging=false;pinchDist=touchDist(e.touches);}
 },{passive:false});
-vp.addEventListener('touchmove',e=>{
+cvs.addEventListener('touchmove',e=>{
   e.preventDefault();
   if(e.touches.length===1&&isDragging){
     const x=e.touches[0].clientX,y=e.touches[0].clientY;
@@ -608,8 +611,7 @@ vp.addEventListener('touchmove',e=>{
     pinchDist=d;
   }
 },{passive:false});
-vp.addEventListener('touchend',e=>{
-  e.preventDefault();
+cvs.addEventListener('touchend',e=>{
   if(e.touches.length===0)isDragging=false;
   if(e.touches.length<2)pinchDist=0;
   if(e.touches.length===1){isDragging=true;prev={x:e.touches[0].clientX,y:e.touches[0].clientY};}
