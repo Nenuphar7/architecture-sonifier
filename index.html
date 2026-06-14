@@ -90,9 +90,7 @@ html,body{height:100%;background:var(--ink);color:var(--text);font-family:system
   <div>
     <div class="slabel">Display</div>
     <div class="ctrls">
-      <div class="crow">Wireframe<label class="toggle"><input type="checkbox" id="wireT" checked><span class="track"></span></label></div>
       <div class="crow">Solid fill<label class="toggle"><input type="checkbox" id="solidT" checked><span class="track"></span></label></div>
-      <div class="crow">Auto-rotate<label class="toggle"><input type="checkbox" id="rotT" checked><span class="track"></span></label></div>
     </div>
   </div>
   <div class="spacer"></div>
@@ -173,8 +171,8 @@ function decodeF32(b){const bin=atob(b),buf=new ArrayBuffer(bin.length),u8=new U
 function decodeU32(b){const bin=atob(b),buf=new ArrayBuffer(bin.length),u8=new Uint8Array(buf);for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);return new Uint32Array(buf)}
 
 let scene,camera,renderer,ptsMesh,scanPlane,scanU;
-let wireMesh,solidMesh,profileLines,profileGlow,cachedVerts=null,cachedIdx=null;
-let autoRotate=true,isDragging=false,prev={x:0,y:0};
+let solidMesh,profileLines,profileGlow,cachedVerts=null,cachedIdx=null;
+let isDragging=false,prev={x:0,y:0};
 let sph={theta:0.22,phi:1.05,r:3.8};
 
 function initScene(){
@@ -235,10 +233,7 @@ function buildScene(verts,indices){
   geo.setIndex(new THREE.BufferAttribute(indices,1));
   geo.computeVertexNormals();
 
-  wireMesh=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({color:0x1a2d55,wireframe:true,transparent:true,opacity:0.45}));
-  scene.add(wireMesh);
-
-  solidMesh=new THREE.Mesh(geo,new THREE.MeshPhongMaterial({color:0x0e1a40,emissive:0x081428,transparent:true,opacity:0.22,side:THREE.DoubleSide,depthWrite:false}));
+  solidMesh=new THREE.Mesh(geo,new THREE.MeshPhongMaterial({color:0x14233f,emissive:0x0a1830,transparent:true,opacity:0.62,side:THREE.DoubleSide,depthWrite:true}));
   solidMesh.visible=true;
   scene.add(solidMesh);
   scene.add(new THREE.AmbientLight(0x3060a0,0.5));
@@ -552,7 +547,7 @@ function updBtn(){
 
 document.getElementById('play-btn').addEventListener('click',()=>{
   if(!audioBuf)return;playing=!playing;updBtn();
-  if(playing){autoRotate=false;document.getElementById('rotT').checked=false;playFrom((document.getElementById('progress').value/1000)*DURATION);}
+  if(playing){playFrom((document.getElementById('progress').value/1000)*DURATION);}
   else{const p=curPos();stopAudio();playOff=p;}
 });
 document.getElementById('progress').addEventListener('input',e=>{
@@ -561,9 +556,7 @@ document.getElementById('progress').addEventListener('input',e=>{
   setScanX((t/DURATION)*2-1);
   if(playing)playFrom(t);
 });
-document.getElementById('wireT').addEventListener('change',e=>{if(wireMesh)wireMesh.visible=e.target.checked;});
 document.getElementById('solidT').addEventListener('change',e=>{if(solidMesh)solidMesh.visible=e.target.checked;});
-document.getElementById('rotT').addEventListener('change',e=>{autoRotate=e.target.checked;});
 
 function drawScope(t){
   if(!audioBuf)return;
@@ -581,7 +574,7 @@ function drawScope(t){
 }
 
 const vp=document.getElementById('viewport');
-vp.addEventListener('mousedown',e=>{isDragging=true;prev={x:e.clientX,y:e.clientY};autoRotate=false;document.getElementById('rotT').checked=false;});
+vp.addEventListener('mousedown',e=>{isDragging=true;prev={x:e.clientX,y:e.clientY};});
 document.addEventListener('mousemove',e=>{
   if(!isDragging)return;
   sph.theta-=(e.clientX-prev.x)*0.006;
@@ -595,7 +588,6 @@ vp.addEventListener('wheel',e=>{
 
 function animate(){
   requestAnimationFrame(animate);
-  if(autoRotate){sph.theta+=0.002;updateCam();}
   if(playing){
     const p=curPos();
     if(p>=DURATION){playing=false;updBtn();setProgress(0);}
