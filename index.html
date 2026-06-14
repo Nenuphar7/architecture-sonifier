@@ -173,6 +173,7 @@ function decodeU32(b){const bin=atob(b),buf=new ArrayBuffer(bin.length),u8=new U
 
 let scene,camera,renderer,ptsMesh,scanPlane,scanU;
 let solidMesh,profileLines,profileGlow,cachedVerts=null,cachedIdx=null;
+let profGeoRef=null,profMaxSeg=4000;
 let isDragging=false,prev={x:0,y:0};
 let sph={theta:0.22,phi:1.05,r:3.8};
 
@@ -259,134 +260,82 @@ function buildScene(verts,indices){
   scanPlane=sp;
   scene.add(sp);
 
-  // Profile — true cross-section as THICK ribbon (quads in the Y-Z plane)
+  // Profile — thin true cross-section, expanded to CONSTANT SCREEN-SPACE width.
+  // Geometry stores only segment endpoints (aStart/aEnd); a vertex shader
+  // offsets each vertex perpendicular in screen space → width never changes
+  // with zoom or rotation.
+  const maxSeg=4000;
+  profMaxSeg=maxSeg;
+  const vCount=maxSeg*6;
+  const aStart=new Float32Array(vCount*3);
+  const aEnd  =new Float32Array(vCount*3);
+  const aWhich=new Float32Array(vCount);
+  const aSide =new Float32Array(vCount);
+  const whichP=[0,1,1, 0,1,0];
+  const sideP =[1,1,-1, 1,-1,-1];
+  for(let s=0;s<maxSeg;s++)for(let k=0;k<6;k++){
+    const i=s*6+k; aWhich[i]=whichP[k]; aSide[i]=sideP[k];
+  }
   const profGeo=new THREE.BufferGeometry();
-  const maxSeg=4000;               // segments
-  profGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(maxSeg*6*3),3)); // 2 tris/seg
+  profGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(vCount*3),3)); // dummy (count only)
+  profGeo.setAttribute('aStart',new THREE.BufferAttribute(aStart,3));
+  profGeo.setAttribute('aEnd',  new THREE.BufferAttribute(aEnd,3));
+  profGeo.setAttribute('aWhich',new THREE.BufferAttribute(aWhich,1));
+  profGeo.setAttribute('aSide', new THREE.BufferAttribute(aSide,1));
   profGeo.setDrawRange(0,0);
-  profileLines=new THREE.Mesh(profGeo,new THREE.MeshBasicMaterial({
-    color:0xffffff,transparent:true,opacity:1.0,side:THREE.DoubleSide,
-    blending:THREE.AdditiveBlending,depthWrite:false,depthTest:false
-  }));
-  profileLines.renderOrder=999;
+  profGeoRef=profGeo;
+
+  const VSH=`
+    uniform vec2 uRes; uniform float uHalfPx;
+    attribute vec3 aStart; attribute vec3 aEnd;
+    attribute float aWhich; attribute float aSide;
+    void main(){
+      vec4 cs=projectionMatrix*modelViewMatrix*vec4(aStart,1.0);
+      vec4 ce=projectionMatrix*modelViewMatrix*vec4(aEnd,1.0);
+      vec2 ns=cs.xy/cs.w, ne=ce.xy/ce.w;
+      vec2 dir=normalize((ne-ns)*uRes);
+      vec2 nrm=vec2(-dir.y,dir.x);
+      vec4 clip=mix(cs,ce,aWhich);
+      clip.xy += nrm*aSide*(uHalfPx/uRes)*clip.w;
+      gl_Position=clip;
+    }`;
+  const FSH=`
+    uniform vec3 uColor; uniform float uOpacity;
+    void main(){ gl_FragColor=vec4(uColor,uOpacity); }`;
+  const mkMat=(color,halfPx,opacity)=>new THREE.ShaderMaterial({
+    uniforms:{uRes:{value:new THREE.Vector2(window.innerWidth,window.innerHeight)},
+              uHalfPx:{value:halfPx},uColor:{value:new THREE.Color(color)},uOpacity:{value:opacity}},
+    vertexShader:VSH,fragmentShader:FSH,
+    transparent:true,depthTest:false,depthWrite:false,blending:THREE.AdditiveBlending
+  });
+
+  profileGlow=new THREE.Mesh(profGeo,mkMat(0x2ff0e0,7.0,0.5));
+  profileGlow.renderOrder=998; profileGlow.frustumCulled=false;
+  scene.add(profileGlow);
+
+  profileLines=new THREE.Mesh(profGeo,mkMat(0xffffff,2.4,1.0));
+  profileLines.renderOrder=999; profileLines.frustumCulled=false;
   scene.add(profileLines);
 
-  // Soft outer glow — same ribbon, fatter & dimmer, turquoise
-  const glowGeo=new THREE.BufferGeometry();
-  glowGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(maxSeg*6*3),3));
-  glowGeo.setDrawRange(0,0);
-  profileGlow=new THREE.Mesh(glowGeo,new THREE.MeshBasicMaterial({
-    color:0x2ff0e0,transparent:true,opacity:0.45,side:THREE.DoubleSide,
-    blending:THREE.AdditiveBlending,depthWrite:false,depthTest:false
-  }));
-  profileGlow.renderOrder=998;
-  scene.add(profileGlow);
+  updateProfileResolution();
 }
 
-// Build a continuous mitered ribbon along a 2D polyline (points in YZ at x).
-// pts: flat array [y0,z0,y1,z1,...]; returns new write offset.
-function emitRibbon(arr,o,x,pts,w,closed,maxFloats){
-  const n=pts.length/2;
-  if(n<2)return o;
-  // precompute per-vertex normals (miter)
-  const nx=new Float32Array(n), nz=new Float32Array(n);
-  for(let i=0;i<n;i++){
-    // direction of incoming and outgoing segments
-    let inY=0,inZ=0,outY=0,outZ=0;
-    if(i>0||closed){
-      const pi=(i-1+n)%n;
-      inY=pts[i*2]-pts[pi*2]; inZ=pts[i*2+1]-pts[pi*2+1];
-      const l=Math.hypot(inY,inZ)||1e-6; inY/=l; inZ/=l;
-    }
-    if(i<n-1||closed){
-      const ni=(i+1)%n;
-      outY=pts[ni*2]-pts[i*2]; outZ=pts[ni*2+1]-pts[i*2+1];
-      const l=Math.hypot(outY,outZ)||1e-6; outY/=l; outZ/=l;
-    }
-    // average tangent
-    let ty=inY+outY, tz=inZ+outZ;
-    const tl=Math.hypot(ty,tz);
-    if(tl<1e-4){ty=outY||inY; tz=outZ||inZ;} else {ty/=tl;tz/=tl;}
-    // normal = perp of tangent
-    let mnx=-tz, mnz=ty;
-    // miter length compensation
-    let miter=1;
-    if(tl>=1e-4){
-      const ref=(i<n-1||closed)?[outY,outZ]:[inY,inZ];
-      const cosA=mnx*(-ref[1])+mnz*(ref[0]);
-      miter=Math.min(2.5,1/Math.max(0.4,Math.abs(cosA)));
-    }
-    nx[i]=mnx*w*miter; nz[i]=mnz*w*miter;
+function updateProfileResolution(){
+  const vp=document.getElementById('viewport');
+  const w=vp.clientWidth,h=vp.clientHeight;
+  for(const m of [profileLines,profileGlow]){
+    if(m&&m.material&&m.material.uniforms)m.material.uniforms.uRes.value.set(w,h);
   }
-  const segCount=closed?n:n-1;
-  for(let i=0;i<segCount;i++){
-    const j=(i+1)%n;
-    if(o+18>maxFloats)break;
-    const Ly0=pts[i*2]+nx[i], Lz0=pts[i*2+1]+nz[i];
-    const Ry0=pts[i*2]-nx[i], Rz0=pts[i*2+1]-nz[i];
-    const Ly1=pts[j*2]+nx[j], Lz1=pts[j*2+1]+nz[j];
-    const Ry1=pts[j*2]-nx[j], Rz1=pts[j*2+1]-nz[j];
-    arr[o++]=x;arr[o++]=Ly0;arr[o++]=Lz0;
-    arr[o++]=x;arr[o++]=Ly1;arr[o++]=Lz1;
-    arr[o++]=x;arr[o++]=Ry1;arr[o++]=Rz1;
-    arr[o++]=x;arr[o++]=Ly0;arr[o++]=Lz0;
-    arr[o++]=x;arr[o++]=Ry1;arr[o++]=Rz1;
-    arr[o++]=x;arr[o++]=Ry0;arr[o++]=Rz0;
-  }
-  return o;
 }
 
-// Chain raw cross-section segments into continuous polylines by shared endpoints.
-function chainSegments(segs){
-  const Q=1e4;
-  const key=(y,z)=>Math.round(y*Q)+','+Math.round(z*Q);
-  const adj=new Map();
-  for(let i=0;i<segs.length;i++){
-    const s=segs[i];
-    for(const e of [0,1]){
-      const k=e===0?key(s[0],s[1]):key(s[2],s[3]);
-      if(!adj.has(k))adj.set(k,[]);
-      adj.get(k).push({seg:i,end:e});
-    }
-  }
-  const used=new Uint8Array(segs.length);
-  const polylines=[];
-  for(let i=0;i<segs.length;i++){
-    if(used[i])continue;
-    used[i]=1;
-    const s=segs[i];
-    let pts=[s[0],s[1],s[2],s[3]];
-    let curKey=key(s[2],s[3]);
-    while(true){
-      const cands=adj.get(curKey);if(!cands)break;
-      let nxt=-1,nend=0;
-      for(const c of cands){if(!used[c.seg]){nxt=c.seg;nend=c.end;break;}}
-      if(nxt<0)break;used[nxt]=1;const ns=segs[nxt];
-      if(nend===0){pts.push(ns[2],ns[3]);curKey=key(ns[2],ns[3]);}
-      else        {pts.push(ns[0],ns[1]);curKey=key(ns[0],ns[1]);}
-    }
-    curKey=key(s[0],s[1]);
-    while(true){
-      const cands=adj.get(curKey);if(!cands)break;
-      let nxt=-1,nend=0;
-      for(const c of cands){if(!used[c.seg]){nxt=c.seg;nend=c.end;break;}}
-      if(nxt<0)break;used[nxt]=1;const ns=segs[nxt];
-      if(nend===0){pts.unshift(ns[2],ns[3]);curKey=key(ns[2],ns[3]);}
-      else        {pts.unshift(ns[0],ns[1]);curKey=key(ns[0],ns[1]);}
-    }
-    polylines.push(pts);
-  }
-  return polylines;
-}
-
-// True cross-section + subtract platform-top edge under the building footprint.
+// Cross-section profile → fill segment-endpoint buffers for the screen-space
+// fat-line shader. Thin in the cut plane; constant pixel width on screen.
 function updateProfile(scanX){
-  if(!cachedVerts||!cachedIdx)return;
+  if(!cachedVerts||!cachedIdx||!profGeoRef)return;
   const V=cachedVerts,I=cachedIdx;
-  const arr=profileLines.geometry.attributes.position.array;
-  const garr=profileGlow.geometry.attributes.position.array;
-  const maxFloats=arr.length;
-  const W=0.013, GW=0.032, MINLEN=0.004;
+  const aS=profGeoRef.attributes.aStart.array;
+  const aE=profGeoRef.attributes.aEnd.array;
+  const MINLEN=0.004;
 
   // pass 1: collect all segments + find vertical extent
   const raw=[];
@@ -410,50 +359,42 @@ function updateProfile(scanX){
       }
     }
   }
-  if(raw.length===0){
-    profileLines.geometry.setDrawRange(0,0);
-    profileGlow.geometry.setDrawRange(0,0);
-    return;
-  }
+  if(raw.length===0){ profGeoRef.setDrawRange(0,0); return; }
 
-  // platform = thin slab at the bottom. Its top edge ≈ yMin + slab thickness.
-  const SLAB=0.10;                 // platform thickness (normalised)
-  const baseCut=yMin+SLAB;         // anything below this is "platform"
-  // building footprint in Z = span of points ABOVE the platform
+  // subtract platform top edge under building footprint
+  const SLAB=0.10, baseCut=yMin+SLAB;
   let zbMin=Infinity, zbMax=-Infinity;
   for(const h of raw){
     if(h[0]>baseCut){ if(h[1]<zbMin)zbMin=h[1]; if(h[1]>zbMax)zbMax=h[1]; }
     if(h[2]>baseCut){ if(h[3]<zbMin)zbMin=h[3]; if(h[3]>zbMax)zbMax=h[3]; }
   }
   const hasBuilding=zbMax>zbMin;
-  const platTopY=yMin+SLAB*0.82;   // approx height of platform's upper face
+  const platTopY=yMin+SLAB*0.82;
 
-  // pass 2: keep segments, but drop the platform's TOP edge where the
-  // building sits above it (subtract building footprint from the base).
-  const segs=[];
+  // write endpoints into the shader buffers (6 verts per segment)
+  let seg=0;
   for(const h of raw){
+    if(seg>=profMaxSeg)break;
     const dy=Math.abs(h[2]-h[0]);
     const dz=Math.abs(h[3]-h[1]);
-    const midY=(h[0]+h[2])*0.5;
-    const midZ=(h[1]+h[3])*0.5;
-    const nearHoriz=dy<0.05 && dz>0.02;            // near-horizontal run
+    const midY=(h[0]+h[2])*0.5, midZ=(h[1]+h[3])*0.5;
+    const nearHoriz=dy<0.05 && dz>0.02;
     const isPlatTop=nearHoriz && midY>platTopY-0.05 && midY<baseCut+0.02;
     const underBuilding=hasBuilding && midZ>zbMin+0.02 && midZ<zbMax-0.02;
-    if(isPlatTop && underBuilding) continue;       // subtract
-    segs.push(h);
-  }
+    if(isPlatTop && underBuilding) continue;
 
-  const polylines=chainSegments(segs);
-  let o=0,go=0;
-  for(const pl of polylines){
-    o =emitRibbon(arr, o, scanX,pl,W, false,maxFloats);
-    go=emitRibbon(garr,go,scanX,pl,GW,false,maxFloats);
-    if(o+18>maxFloats)break;
+    const y0=h[0],z0=h[1],y1=h[2],z1=h[3];
+    const base=seg*6*3;
+    for(let k=0;k<6;k++){
+      const o=base+k*3;
+      aS[o]=scanX; aS[o+1]=y0; aS[o+2]=z0;
+      aE[o]=scanX; aE[o+1]=y1; aE[o+2]=z1;
+    }
+    seg++;
   }
-  profileLines.geometry.setDrawRange(0,o/3);
-  profileLines.geometry.attributes.position.needsUpdate=true;
-  profileGlow.geometry.setDrawRange(0,go/3);
-  profileGlow.geometry.attributes.position.needsUpdate=true;
+  profGeoRef.attributes.aStart.needsUpdate=true;
+  profGeoRef.attributes.aEnd.needsUpdate=true;
+  profGeoRef.setDrawRange(0,seg*6);
 }
 
 function setScanX(x){
@@ -665,6 +606,7 @@ window.addEventListener('resize',()=>{
   camera.aspect=vp.clientWidth/vp.clientHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(vp.clientWidth,vp.clientHeight);
+  updateProfileResolution();
 });
 
 init();
