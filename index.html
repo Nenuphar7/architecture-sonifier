@@ -253,8 +253,8 @@ function initScene(){
   addArrow(new THREE.Vector3(0,0,1), AX_ORIGIN, 2.80,            0x9b7fff); // TIMBRE (Z)
 }
 function addArrow(dir,origin,len,color){
-  const mat=new THREE.MeshBasicMaterial({color,transparent:true,opacity:0.85});
-  const R=0.018, tipH=0.10, tipR=0.040; // shaft radius × 3 vs old ArrowHelper default
+  const mat=new THREE.MeshBasicMaterial({color});
+  const R=0.012, tipH=0.10, tipR=0.027; // shaft radius × 3 vs old ArrowHelper default
   const shaftH=len-tipH;
 
   // Shaft (cylinder)
