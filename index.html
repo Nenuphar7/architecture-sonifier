@@ -40,11 +40,12 @@ html,body{height:100%;background:var(--ink);color:var(--text);font-family:system
 .axlabel{
   position:absolute;pointer-events:none;
   font-family:monospace;font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
-  padding:3px 7px;border-radius:4px;white-space:nowrap;transition:opacity .3s;
+  padding:3px 7px;white-space:nowrap;transition:opacity .3s;
+  text-shadow:0 0 8px currentColor;
 }
-#ax-time  {color:#ff8c42;border:1px solid rgba(255,140,66,.3);background:rgba(255,140,66,.07)}
-#ax-pitch {color:#3db8ff;border:1px solid rgba(61,184,255,.3);background:rgba(61,184,255,.07)}
-#ax-timbre{color:#9b7fff;border:1px solid rgba(155,127,255,.3);background:rgba(155,127,255,.07)}
+#ax-time  {color:#ff8c42}
+#ax-pitch {color:#3db8ff}
+#ax-timbre{color:#9b7fff}
 
 #loading{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--ink);z-index:10;gap:14px;transition:opacity .7s}
 #loading.hidden{opacity:0;pointer-events:none}
@@ -252,7 +253,26 @@ function initScene(){
   addArrow(new THREE.Vector3(0,0,1), AX_ORIGIN, 2.80,            0x9b7fff); // TIMBRE (Z)
 }
 function addArrow(dir,origin,len,color){
-  scene.add(new THREE.ArrowHelper(dir,origin,len,color,0.08,0.055));
+  const mat=new THREE.MeshBasicMaterial({color,transparent:true,opacity:0.85});
+  const R=0.018, tipH=0.10, tipR=0.040; // shaft radius × 3 vs old ArrowHelper default
+  const shaftH=len-tipH;
+
+  // Shaft (cylinder)
+  const shaft=new THREE.Mesh(new THREE.CylinderGeometry(R,R,shaftH,8),mat);
+  // Tip (cone)
+  const tip=new THREE.Mesh(new THREE.ConeGeometry(tipR,tipH,8),mat);
+
+  // CylinderGeometry is along Y; rotate + position to align with dir
+  const axis=new THREE.Vector3(0,1,0);
+  const quat=new THREE.Quaternion().setFromUnitVectors(axis,dir.clone().normalize());
+
+  shaft.position.copy(origin).addScaledVector(dir.clone().normalize(),shaftH/2);
+  shaft.quaternion.copy(quat);
+
+  tip.position.copy(origin).addScaledVector(dir.clone().normalize(),shaftH+tipH/2);
+  tip.quaternion.copy(quat);
+
+  scene.add(shaft);scene.add(tip);
 }
 function updateCam(){
   const{theta,phi,r}=sph;
