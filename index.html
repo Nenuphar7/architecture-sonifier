@@ -562,11 +562,11 @@ async function buildAudio(verts){
           if(n===2)pts.push({y:(y0+y1)*0.5,z:(z0+z1)*0.5});
         }
         if(!pts.length)continue;
-        // cap synthesis cost: stride-sample dense slices down to ~400 points
+        // cap synthesis cost: stride-sample dense slices down to ~280 points
         let use=pts;
-        if(pts.length>400){
-          use=[];const stride=pts.length/400;
-          for(let k=0;k<400;k++)use.push(pts[Math.floor(k*stride)]);
+        if(pts.length>280){
+          use=[];const stride=pts.length/280;
+          for(let k=0;k<280;k++)use.push(pts[Math.floor(k*stride)]);
         }
         for(const p of use){
           const freq=80+((p.y+0.65)/1.25)*1700;  // Y → pitch
@@ -576,9 +576,14 @@ async function buildAudio(verts){
           for(let h=1;h<=harm;h++){
             const ph=(2*Math.PI*freq*h)/SR;
             const hamp=amp*(1/h);
-            for(let k=0;k<stepS;k++){
-              const idx=t0+k;if(idx>=total)break;
-              const env=k<120?k/120:k>stepS-120?(stepS-k)/120:1;
+            // Triangular window centred on t0, half-width = stepS.
+            // Adjacent steps overlap by 50% and their windows sum to 1,
+            // so constant content (e.g. the flat platform) yields a steady
+            // tone instead of pulsing at the step boundaries.
+            for(let j=-stepS;j<stepS;j++){
+              const idx=t0+j;
+              if(idx<0||idx>=total)continue;
+              const env=1-Math.abs(j)/stepS;
               ch[idx]+=hamp*env*Math.sin(ph*idx);
             }
           }
