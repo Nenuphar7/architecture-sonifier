@@ -339,22 +339,13 @@ function buildScene(verts,indices){
   profGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(maxSeg*6*3),3)); // 2 tris/seg
   profGeo.setDrawRange(0,0);
   profileLines=new THREE.Mesh(profGeo,new THREE.MeshBasicMaterial({
-    color:0xffffff,transparent:true,opacity:1.0,side:THREE.DoubleSide,
-    blending:THREE.AdditiveBlending,depthWrite:false,depthTest:false
+    color:0xffffff,side:THREE.DoubleSide,depthWrite:true,depthTest:true
   }));
   profileLines.renderOrder=999;
   scene.add(profileLines);
 
-  // Soft outer glow — same ribbon, fatter & dimmer, turquoise
-  const glowGeo=new THREE.BufferGeometry();
-  glowGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(maxSeg*6*3),3));
-  glowGeo.setDrawRange(0,0);
-  profileGlow=new THREE.Mesh(glowGeo,new THREE.MeshBasicMaterial({
-    color:0x2ff0e0,transparent:true,opacity:0.45,side:THREE.DoubleSide,
-    blending:THREE.AdditiveBlending,depthWrite:false,depthTest:false
-  }));
-  profileGlow.renderOrder=998;
-  scene.add(profileGlow);
+  // No glow layer — profile matches axis line style (opaque, same thickness)
+  profileGlow=null;
 }
 
 // Build a continuous mitered ribbon along a 2D polyline (points in YZ at x).
@@ -458,9 +449,8 @@ function updateProfile(scanX){
   if(!cachedVerts||!cachedIdx)return;
   const V=cachedVerts,I=cachedIdx;
   const arr=profileLines.geometry.attributes.position.array;
-  const garr=profileGlow.geometry.attributes.position.array;
   const maxFloats=arr.length;
-  const W=0.013, GW=0.032, MINLEN=0.004;
+  const W=0.024, MINLEN=0.004;  // same diameter as axis cylinders (R*2)
 
   // pass 1: collect all segments + find vertical extent
   const raw=[];
@@ -486,7 +476,6 @@ function updateProfile(scanX){
   }
   if(raw.length===0){
     profileLines.geometry.setDrawRange(0,0);
-    profileGlow.geometry.setDrawRange(0,0);
     return;
   }
 
@@ -518,16 +507,13 @@ function updateProfile(scanX){
   }
 
   const polylines=chainSegments(segs);
-  let o=0,go=0;
+  let o=0;
   for(const pl of polylines){
-    o =emitRibbon(arr, o, scanX,pl,W, false,maxFloats);
-    go=emitRibbon(garr,go,scanX,pl,GW,false,maxFloats);
+    o=emitRibbon(arr,o,scanX,pl,W,false,maxFloats);
     if(o+18>maxFloats)break;
   }
   profileLines.geometry.setDrawRange(0,o/3);
   profileLines.geometry.attributes.position.needsUpdate=true;
-  profileGlow.geometry.setDrawRange(0,go/3);
-  profileGlow.geometry.attributes.position.needsUpdate=true;
 }
 
 function setScanX(x){
