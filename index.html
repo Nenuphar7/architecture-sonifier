@@ -5,154 +5,153 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Architecture Sonifier</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&display=swap" rel="stylesheet">
 <style>
+/* ── Ambient gallery theme ───────────────────────────────────────
+   Subject: the Taj Mahal turned to sound — pale marble floating in a
+   warm dark void, a single luminous cross-section sweeping through it.
+   Palette: warm near-black, muted Mughal gold, marble white. One serif
+   throughout (Cormorant Garamond). No HUD, no grid, minimal numbers. */
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
-:root{--ink:#080b15;--panel:#0d1020;--border:rgba(255,255,255,.06);--accent:#3db8ff;--accent2:#ff8c42;--muted:#334;--text:#b0bcd8;--dim:#445}
-html,body{height:100%;background:var(--ink);color:var(--text);font-family:system-ui,sans-serif;overflow:hidden}
-#app{display:grid;grid-template-columns:210px 1fr;grid-template-rows:1fr 120px;height:100vh;height:100dvh}
-#sidebar{grid-row:1/3;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:20px 16px;gap:20px;overflow-y:auto}
-.logo{font-size:10px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);display:flex;align-items:center;gap:8px;font-family:monospace}
-.logo::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent)}
-.slabel{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;font-family:monospace}
-.card{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:8px;padding:12px}
-.card h2{font-size:13px;font-weight:500;color:#dde4f0;margin-bottom:6px}
-.meta{font-size:11px;color:var(--dim);line-height:1.9;font-family:monospace}.meta span{color:var(--accent)}
-.meta .mx{color:#ff8c42}.meta .my{color:#3db8ff}.meta .mz{color:#9b7fff}
-.legend{display:flex;flex-direction:column;gap:8px}
-.leg{display:flex;align-items:center;gap:10px;font-size:11px;color:var(--dim)}
-.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-.db{background:rgba(80,110,180,.3)}.dp{background:#ff8c42;box-shadow:0 0 8px #ff8c42}
-.ctrls{display:flex;flex-direction:column;gap:10px}
-.crow{display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--dim)}
-.toggle{position:relative;width:32px;height:17px}
+:root{
+  --void:#0b0a08; --glow:#1b150e; --marble:#f1e9da; --gold:#cda265;
+  --text:#a39a88; --dim:#6a6353; --faint:#48433a;
+  --line:rgba(241,233,218,.07);
+  --serif:'Cormorant Garamond',Georgia,'Times New Roman',serif;
+}
+html,body{height:100%;background:var(--void);color:var(--text);font-family:var(--serif);overflow:hidden;-webkit-font-smoothing:antialiased}
+#app{display:grid;grid-template-columns:230px 1fr;grid-template-rows:1fr 120px;height:100vh;height:100dvh}
+
+#sidebar{grid-row:1/3;background:linear-gradient(180deg,rgba(241,233,218,.018),transparent);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:30px 26px;gap:30px;overflow-y:auto}
+
+.logo{font-size:23px;font-weight:300;letter-spacing:.01em;color:var(--marble);line-height:1.15}
+.logo em{display:block;font-style:italic;font-size:14px;color:var(--gold);letter-spacing:.05em;margin-top:3px}
+
+.slabel{font-size:11px;letter-spacing:.32em;text-transform:uppercase;color:var(--faint);margin-bottom:12px;font-weight:400}
+
+/* Source — quiet caption, no card */
+.src h2{font-family:var(--serif);font-style:italic;font-weight:400;font-size:26px;color:var(--marble);line-height:1;margin-bottom:10px}
+.src .mapping{font-size:16px;color:var(--text);line-height:1.85}
+.src .mapping b{font-weight:500;color:var(--marble);font-style:italic}
+
+/* Now sounding — the only readout, kept poetic */
+.now{display:flex;flex-direction:column;gap:2px;min-height:84px}
+.now-note{font-size:54px;font-weight:300;color:var(--marble);line-height:.95;letter-spacing:.01em}
+.now-note.silent{color:var(--faint)}
+.now-sub{font-size:16px;color:var(--text);font-style:italic;letter-spacing:.02em}
+.now-sub .sep{color:var(--faint);font-style:normal;margin:0 5px}
+
+/* Visualizers — ambient sound-art, no frames */
+.viz{display:flex;flex-direction:column;gap:16px}
+.viz figure{display:flex;flex-direction:column;gap:6px}
+.viz figcaption{font-size:10px;letter-spacing:.28em;text-transform:uppercase;color:var(--faint)}
+.viz canvas{display:block;width:100%}
+
+/* Display toggle — minimal */
+.crow{display:flex;align-items:center;justify-content:space-between;font-size:16px;color:var(--text);font-style:italic}
+.toggle{position:relative;width:34px;height:18px}
 .toggle input{opacity:0;width:0;height:0}
-.track{position:absolute;inset:0;background:rgba(255,255,255,.07);border-radius:8px;cursor:pointer;transition:background .2s}
-.track::after{content:'';position:absolute;left:2px;top:2px;width:13px;height:13px;border-radius:50%;background:#334;transition:transform .2s,background .2s}
-.toggle input:checked+.track{background:rgba(61,184,255,.25)}
-.toggle input:checked+.track::after{transform:translateX(15px);background:var(--accent)}
+.track{position:absolute;inset:0;background:rgba(241,233,218,.08);border-radius:9px;cursor:pointer;transition:background .25s}
+.track::after{content:'';position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--dim);transition:transform .25s,background .25s}
+.toggle input:checked+.track{background:rgba(205,162,101,.22)}
+.toggle input:checked+.track::after{transform:translateX(16px);background:var(--gold)}
+
 .spacer{flex:1}
-.credit{font-size:10px;color:var(--muted);line-height:1.7;font-family:monospace}
-#viewport{position:relative;overflow:hidden}
+.credit{font-size:13px;color:var(--faint);line-height:1.7;font-style:italic}
+
+#viewport{position:relative;overflow:hidden;background:radial-gradient(120% 95% at 50% 42%,var(--glow) 0%,#0d0b08 45%,var(--void) 78%)}
 #canvas{display:block;width:100%;height:100%;touch-action:none}
 #viewport{touch-action:none}
 
-/* ── Axis labels overlay ── */
-.axlabel{
-  position:absolute;pointer-events:none;
-  font-family:monospace;font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
-  padding:3px 7px;border-radius:4px;white-space:nowrap;transition:opacity .3s;
-}
-#ax-time  {color:#ff8c42;border:1px solid rgba(255,140,66,.3);background:rgba(255,140,66,.07)}
-#ax-pitch {color:#3db8ff;border:1px solid rgba(61,184,255,.3);background:rgba(61,184,255,.07)}
-#ax-timbre{color:#9b7fff;border:1px solid rgba(155,127,255,.3);background:rgba(155,127,255,.07)}
+/* Axis labels — whispered, single tone, no boxes */
+.axlabel{position:absolute;pointer-events:none;font-family:var(--serif);font-style:italic;font-size:15px;letter-spacing:.04em;color:var(--dim);white-space:nowrap;transition:opacity .4s;text-shadow:0 1px 8px rgba(0,0,0,.6)}
 
-#loading{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--ink);z-index:10;gap:14px;transition:opacity .7s}
+#loading{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--void);z-index:10;gap:18px;transition:opacity .9s}
 #loading.hidden{opacity:0;pointer-events:none}
-.ring{width:42px;height:42px;border:1.5px solid rgba(61,184,255,.15);border-top-color:var(--accent);border-radius:50%;animation:spin 1.1s linear infinite}
-.llbl{font-size:10px;color:var(--dim);letter-spacing:.1em;font-family:monospace}
-#lst{font-size:10px;color:var(--accent);font-family:monospace}
+.ring{width:46px;height:46px;border:1px solid rgba(205,162,101,.18);border-top-color:var(--gold);border-radius:50%;animation:spin 1.4s linear infinite}
+.llbl{font-size:18px;color:var(--text);font-style:italic;letter-spacing:.03em}
+#lst{font-size:12px;color:var(--faint);letter-spacing:.08em}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-#transport{background:var(--panel);border-top:1px solid var(--border);display:flex;align-items:center;padding:0 24px;padding-bottom:env(safe-area-inset-bottom,0px);gap:16px;height:100%;box-sizing:border-box}
-#play-btn{width:58px;height:58px;border-radius:50%;border:2px solid var(--accent);background:rgba(61,184,255,.12);color:var(--accent);font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s;box-shadow:0 0 18px rgba(61,184,255,.2)}
-#play-btn:hover{background:rgba(61,184,255,.1)}
-#play-btn.playing{border-color:var(--accent2);color:var(--accent2)}
-#tlw{flex:1;display:flex;flex-direction:column;gap:5px}
-#progress{width:100%;height:3px;-webkit-appearance:none;appearance:none;background:rgba(255,255,255,.07);border-radius:2px;outline:none;cursor:pointer}
-#progress::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;border-radius:50%;background:var(--accent2);box-shadow:0 0 8px var(--accent2)}
-#trow{display:flex;justify-content:space-between;font-size:10px;color:var(--dim);font-family:monospace}
-#cur{color:var(--accent2)}
+#transport{border-top:1px solid var(--line);display:flex;align-items:center;padding:0 32px;padding-bottom:env(safe-area-inset-bottom,0px);gap:24px;height:100%;box-sizing:border-box;background:linear-gradient(0deg,rgba(241,233,218,.015),transparent)}
+#play-btn{width:56px;height:56px;border-radius:50%;border:1px solid rgba(205,162,101,.45);background:transparent;color:var(--gold);font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .3s;padding-left:3px}
+#play-btn:hover{border-color:var(--gold);box-shadow:0 0 26px rgba(205,162,101,.22)}
+#play-btn.playing{padding-left:0;box-shadow:0 0 30px rgba(205,162,101,.3)}
+#tlw{flex:1;display:flex;flex-direction:column;gap:9px}
+#progress{width:100%;height:1px;-webkit-appearance:none;appearance:none;background:rgba(241,233,218,.12);outline:none;cursor:pointer}
+#progress::-webkit-slider-thumb{-webkit-appearance:none;width:9px;height:9px;border-radius:50%;background:var(--gold);box-shadow:0 0 12px rgba(205,162,101,.7)}
+#progress::-moz-range-thumb{width:9px;height:9px;border:none;border-radius:50%;background:var(--gold)}
+#trow{display:flex;justify-content:space-between;font-size:13px;color:var(--faint);font-style:italic;letter-spacing:.04em}
+#cur{color:var(--gold)}
 
-/* Live readout in sidebar */
-.readout{display:flex;flex-direction:column;gap:9px}
-.rrow{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.rlabel{font-size:10px;letter-spacing:.08em;text-transform:uppercase;font-family:monospace;color:var(--dim)}
-.rval{font-size:13px;font-family:monospace;font-weight:600;font-variant-numeric:tabular-nums}
-.rval.pitch{color:var(--accent)}
-.rval.timbre{color:#9b7fff}
-.rval.note{color:#cdd6ec;font-size:11px}
-.rbar{position:relative;height:4px;border-radius:2px;background:rgba(255,255,255,.06);overflow:hidden;margin-top:3px}
-.rbar > i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;transition:width .08s linear}
-.rbar.pitch > i{background:var(--accent)}
-.rbar.timbre > i{background:#9b7fff}
-
-/* Analysis panel (scope + FFT) */
-.analysis{display:flex;flex-direction:column;gap:8px}
-.acanvaswrap{position:relative;background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:6px;overflow:hidden}
-.acanvaswrap canvas{display:block;width:100%}
-.acap{position:absolute;top:4px;left:7px;font-size:8px;letter-spacing:.12em;text-transform:uppercase;font-family:monospace;color:var(--muted);pointer-events:none}
+@media (prefers-reduced-motion:reduce){
+  *{animation-duration:.001ms!important;transition-duration:.001ms!important}
+}
+@media (max-width:720px){
+  #app{grid-template-columns:178px 1fr}
+  #sidebar{padding:22px 18px;gap:22px}
+  .logo{font-size:19px}
+  .now-note{font-size:42px}
+  .src h2{font-size:22px}
+  .src .mapping{font-size:14px}
+}
 </style>
 </head>
 <body>
 <div id="app">
 <aside id="sidebar">
-  <div class="logo">Architecture Sonifier</div>
-  <div>
-    <div class="slabel">Source Model</div>
-    <div class="card">
-      <h2>Taj Mahal</h2>
-      <div class="meta">
-        vertices <span>11,846</span><br>
-        <span class="mx">X</span> — time (scan)<br>
-        <span class="my">Y</span> — pitch (height)<br>
-        <span class="mz">Z</span> — timbre (depth)
-      </div>
+  <div class="logo">Architecture<em>Sonifier</em></div>
+
+  <div class="src">
+    <div class="slabel">Source</div>
+    <h2>Taj Mahal</h2>
+    <div class="mapping">
+      As the plane sweeps left to right, the building becomes sound.
+      Height becomes <b>pitch</b>, depth becomes <b>timbre</b>.
     </div>
   </div>
+
   <div>
-    <div class="slabel">Sonification</div>
-    <div class="legend">
-      <div class="leg"><div class="dot db"></div>Mesh structure</div>
-      <div class="leg"><div class="dot dp"></div>Active profile</div>
+    <div class="slabel">Now sounding</div>
+    <div class="now">
+      <div class="now-note silent" id="ro-note">silence</div>
+      <div class="now-sub"><span id="ro-timbre">&mdash;</span><span class="sep">/</span><span id="ro-pitch">&mdash;</span></div>
     </div>
   </div>
+
   <div>
-    <div class="slabel">Display</div>
-    <div class="ctrls">
-      <div class="crow">Solid fill<label class="toggle"><input type="checkbox" id="solidT" checked><span class="track"></span></label></div>
+    <div class="slabel">Listening</div>
+    <div class="viz">
+      <figure>
+        <figcaption>Waveform</figcaption>
+        <canvas id="scope" width="178" height="46"></canvas>
+      </figure>
+      <figure>
+        <figcaption>Spectrum</figcaption>
+        <canvas id="fft" width="178" height="56"></canvas>
+      </figure>
     </div>
   </div>
+
   <div>
-    <div class="slabel">Live readout</div>
-    <div class="readout">
-      <div>
-        <div class="rrow"><span class="rlabel">Pitch</span><span class="rval pitch" id="ro-pitch">— Hz</span></div>
-        <div class="rbar pitch"><i id="ro-pitch-bar" style="width:0%"></i></div>
-      </div>
-      <div>
-        <div class="rrow"><span class="rlabel">Timbre</span><span class="rval timbre" id="ro-timbre">—</span></div>
-        <div class="rbar timbre"><i id="ro-timbre-bar" style="width:0%"></i></div>
-      </div>
-      <div class="rrow"><span class="rlabel">Note</span><span class="rval note" id="ro-note">—</span></div>
-      <div class="rrow"><span class="rlabel">Voices</span><span class="rval note" id="ro-voices">0</span></div>
-    </div>
+    <div class="crow">Show marble<label class="toggle"><input type="checkbox" id="solidT" checked><span class="track"></span></label></div>
   </div>
-  <div>
-    <div class="slabel">Analysis</div>
-    <div class="analysis">
-      <div class="acanvaswrap">
-        <canvas id="scope" width="178" height="54"></canvas>
-        <span class="acap">Waveform</span>
-      </div>
-      <div class="acanvaswrap">
-        <canvas id="fft" width="178" height="64"></canvas>
-        <span class="acap">Spectrum</span>
-      </div>
-    </div>
-  </div>
+
   <div class="spacer"></div>
-  <div class="credit">Geometry scan<br>Additive synthesis<br>Y=pitch · Z=timbre</div>
+  <div class="credit">Geometry scanned into<br>additive synthesis.</div>
 </aside>
 
 <div id="viewport">
   <canvas id="canvas"></canvas>
   <!-- Axis labels — repositioned each frame via JS projection -->
-  <div id="ax-time"   class="axlabel">time →</div>
-  <div id="ax-pitch"  class="axlabel">pitch ↑</div>
-  <div id="ax-timbre" class="axlabel">timbre ↗</div>
+  <div id="ax-time"   class="axlabel">time</div>
+  <div id="ax-pitch"  class="axlabel">pitch</div>
+  <div id="ax-timbre" class="axlabel">timbre</div>
   <div id="loading">
     <div class="ring"></div>
-    <div class="llbl">Initializing scan</div>
+    <div class="llbl">Listening to the marble</div>
     <div id="lst">parsing geometry...</div>
   </div>
 </div>
@@ -174,9 +173,9 @@ void main(){
   float dx=abs(position.x-scanX);
   float aura=exp(-dx*dx*28.0);
   float edge=exp(-dx*dx*4000.0);
-  vec3 cb=vec3(0.07,0.11,0.26);
-  vec3 ca=vec3(0.10,0.52,1.00);
-  vec3 cp=vec3(1.00,0.58,0.18);
+  vec3 cb=vec3(0.14,0.11,0.07);
+  vec3 ca=vec3(0.62,0.49,0.30);
+  vec3 cp=vec3(1.00,0.92,0.78);
   vColor=mix(cb,ca,aura);
   vColor=mix(vColor,cp,edge);
   vAlpha=0.15+0.85*aura;
@@ -232,27 +231,24 @@ let sph={theta:0.22,phi:1.05,r:3.8};
 
 function initScene(){
   scene=new THREE.Scene();
-  scene.background=new THREE.Color(0x080b15);
-  scene.fog=new THREE.FogExp2(0x080b15,0.04);
+  scene.fog=new THREE.FogExp2(0x0b0a08,0.035);
   const vp=document.getElementById('viewport');
   camera=new THREE.PerspectiveCamera(50,vp.clientWidth/vp.clientHeight,0.05,100);
   updateCam();
-  renderer=new THREE.WebGLRenderer({canvas:document.getElementById('canvas'),antialias:true});
+  renderer=new THREE.WebGLRenderer({canvas:document.getElementById('canvas'),antialias:true,alpha:true});
   renderer.setSize(vp.clientWidth,vp.clientHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+  renderer.setClearColor(0x000000,0); // transparent — CSS radial glow shows through
 
-  // Grid
-  const grid=new THREE.GridHelper(4,24,0x111826,0x0c1320);
-  grid.position.y=-0.67;
-  scene.add(grid);
-
-  // Axes — arrows along the bounding-box edges, outside the model
-  addArrow(new THREE.Vector3(1,0,0), AX_ORIGIN, (1.35-SCAN_MIN), 0xff8c42); // TIME  (X)
-  addArrow(new THREE.Vector3(0,1,0), AX_ORIGIN, 1.50,            0x3db8ff); // PITCH (Y)
-  addArrow(new THREE.Vector3(0,0,1), AX_ORIGIN, 2.80,            0x9b7fff); // TIMBRE (Z)
+  // Faint single-tone axis lines (no arrows, no grid)
+  axisLine(AX_ORIGIN, AX_TIME_TIP);
+  axisLine(AX_ORIGIN, AX_PITCH_TIP);
+  axisLine(AX_ORIGIN, AX_TIMBRE_TIP);
 }
-function addArrow(dir,origin,len,color){
-  scene.add(new THREE.ArrowHelper(dir,origin,len,color,0.08,0.055));
+function axisLine(a,b){
+  const g=new THREE.BufferGeometry().setFromPoints([a,b]);
+  const m=new THREE.LineBasicMaterial({color:0xcda265,transparent:true,opacity:0.16});
+  scene.add(new THREE.Line(g,m));
 }
 function updateCam(){
   const{theta,phi,r}=sph;
@@ -288,11 +284,12 @@ function buildScene(verts,indices){
   geo.setIndex(new THREE.BufferAttribute(indices,1));
   geo.computeVertexNormals();
 
-  solidMesh=new THREE.Mesh(geo,new THREE.MeshPhongMaterial({color:0x14233f,emissive:0x0b1a36,transparent:true,opacity:0.60,side:THREE.DoubleSide,depthWrite:true}));
+  solidMesh=new THREE.Mesh(geo,new THREE.MeshPhongMaterial({color:0xe9e1d2,emissive:0x241d12,specular:0x40362a,shininess:18,transparent:true,opacity:0.30,side:THREE.DoubleSide,depthWrite:true}));
   solidMesh.visible=true;
   scene.add(solidMesh);
-  scene.add(new THREE.AmbientLight(0x3060a0,0.5));
-  const pt=new THREE.PointLight(0x3db8ff,0.7,8);pt.position.set(0,2,2);scene.add(pt);
+  scene.add(new THREE.AmbientLight(0x6b5a40,0.55));
+  const pt=new THREE.PointLight(0xffe6b8,0.85,9);pt.position.set(1.5,2.5,2);scene.add(pt);
+  const pt2=new THREE.PointLight(0xcda265,0.45,9);pt2.position.set(-2,1,-1.5);scene.add(pt2);
 
   // Points (scan shader — no labels, just glow)
   const pgeo=new THREE.BufferGeometry();
@@ -306,9 +303,9 @@ function buildScene(verts,indices){
   }));
   scene.add(ptsMesh);
 
-  // Scan plane (thin, blueish)
+  // Scan plane (thin, warm)
   const sp=new THREE.Mesh(new THREE.PlaneGeometry(0.004,1.4),
-    new THREE.MeshBasicMaterial({color:0x3db8ff,transparent:true,opacity:0.4,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending}));
+    new THREE.MeshBasicMaterial({color:0xcda265,transparent:true,opacity:0.32,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending}));
   sp.rotation.y=Math.PI/2;
   scanPlane=sp;
   scene.add(sp);
@@ -319,18 +316,18 @@ function buildScene(verts,indices){
   profGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(maxSeg*6*3),3)); // 2 tris/seg
   profGeo.setDrawRange(0,0);
   profileLines=new THREE.Mesh(profGeo,new THREE.MeshBasicMaterial({
-    color:0xffffff,transparent:true,opacity:1.0,side:THREE.DoubleSide,
+    color:0xfff4e2,transparent:true,opacity:1.0,side:THREE.DoubleSide,
     blending:THREE.AdditiveBlending,depthWrite:false,depthTest:false
   }));
   profileLines.renderOrder=999;
   scene.add(profileLines);
 
-  // Soft outer glow — same ribbon, fatter & dimmer, turquoise
+  // Soft outer glow — same ribbon, fatter & dimmer, warm gold
   const glowGeo=new THREE.BufferGeometry();
   glowGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(maxSeg*6*3),3));
   glowGeo.setDrawRange(0,0);
   profileGlow=new THREE.Mesh(glowGeo,new THREE.MeshBasicMaterial({
-    color:0x2ff0e0,transparent:true,opacity:0.45,side:THREE.DoubleSide,
+    color:0xe0a866,transparent:true,opacity:0.42,side:THREE.DoubleSide,
     blending:THREE.AdditiveBlending,depthWrite:false,depthTest:false
   }));
   profileGlow.renderOrder=998;
@@ -642,26 +639,20 @@ function computeReadout(scanX){
 
 function updateReadout(scanX){
   const r=computeReadout(scanX);
-  const pEl=document.getElementById('ro-pitch');
-  const pBar=document.getElementById('ro-pitch-bar');
-  const tEl=document.getElementById('ro-timbre');
-  const tBar=document.getElementById('ro-timbre-bar');
   const nEl=document.getElementById('ro-note');
-  const vEl=document.getElementById('ro-voices');
+  const tEl=document.getElementById('ro-timbre');
+  const pEl=document.getElementById('ro-pitch');
+  if(!nEl)return;
   if(!r||!r.count){
-    pEl.textContent='— Hz'; pBar.style.width='0%';
-    tEl.textContent='—'; tBar.style.width='0%';
-    nEl.textContent='—'; vEl.textContent='0';
+    nEl.textContent='silence'; nEl.classList.add('silent');
+    tEl.innerHTML='&mdash;'; pEl.innerHTML='&mdash;';
     return;
   }
-  pEl.textContent=Math.round(r.fLo)+'–'+Math.round(r.fHi)+' Hz';
-  // map fMid (80..1780) → 0..100%
-  pBar.style.width=Math.max(0,Math.min(100,((r.fMid-80)/1700)*100)).toFixed(0)+'%';
-  const tn=['pure','warm','rich','full'][r.harm-1]||'—';
-  tEl.textContent=r.harm+'  ('+tn+')';
-  tBar.style.width=(((r.harm-1)/3)*100).toFixed(0)+'%';
+  nEl.classList.remove('silent');
   nEl.textContent=freqToNote(r.fMid);
-  vEl.textContent=String(r.count);
+  const tn=['pure','warm','rich','full'][r.harm-1]||'—';
+  tEl.textContent=tn;
+  pEl.textContent=Math.round(r.fLo)+'–'+Math.round(r.fHi)+' Hz';
 }
 
 function drawScope(){
@@ -669,19 +660,21 @@ function drawScope(){
   if(!cv)return;
   const cx=cv.getContext('2d'),W=cv.width,H=cv.height;
   cx.clearRect(0,0,W,H);
-  // baseline
-  cx.strokeStyle='rgba(255,255,255,.05)';cx.lineWidth=1;
+  cx.strokeStyle='rgba(241,233,218,.05)';cx.lineWidth=1;
   cx.beginPath();cx.moveTo(0,H/2);cx.lineTo(W,H/2);cx.stroke();
   if(!analyser||!playing){return;}
   analyser.getByteTimeDomainData(timeData);
-  cx.strokeStyle='#ff8c42';cx.lineWidth=1.5;cx.beginPath();
+  cx.strokeStyle='rgba(241,233,218,.85)';cx.lineWidth=1.25;
+  cx.shadowColor='rgba(241,233,218,.5)';cx.shadowBlur=6;
+  cx.beginPath();
   const step=timeData.length/W;
   for(let px=0;px<W;px++){
-    const v=(timeData[Math.floor(px*step)]-128)/128; // -1..1
+    const v=(timeData[Math.floor(px*step)]-128)/128;
     const y=H/2 - v*(H/2-2);
     px===0?cx.moveTo(px,y):cx.lineTo(px,y);
   }
   cx.stroke();
+  cx.shadowBlur=0;
 }
 
 function drawFFT(){
@@ -691,23 +684,38 @@ function drawFFT(){
   cx.clearRect(0,0,W,H);
   if(!analyser||!playing)return;
   analyser.getByteFrequencyData(fftData);
-  // show up to ~4 kHz (where our content lives) on a mild log-ish scale
   const nyq=audioCtx.sampleRate/2;
   const maxHz=4000, maxBin=Math.min(fftData.length, Math.floor(maxHz/nyq*fftData.length));
-  const bars=64, binsPer=maxBin/bars, bw=W/bars;
-  for(let b=0;b<bars;b++){
-    let m=0;
-    const start=Math.floor(b*binsPer), end=Math.floor((b+1)*binsPer);
-    for(let i=start;i<end;i++) if(fftData[i]>m)m=fftData[i];
-    const h=(m/255)*(H-2);
-    // colour gradient cyan→violet across spectrum
-    const t=b/bars;
-    const r=Math.round(61+ (155-61)*t);
-    const g=Math.round(184+(127-184)*t);
-    const bl=Math.round(255+(255-255)*t);
-    cx.fillStyle=`rgb(${r},${g},${bl})`;
-    cx.fillRect(b*bw, H-h, Math.max(1,bw-1), h);
+  // sample a smooth envelope across the spectrum
+  const N=80, pts=[];
+  for(let i=0;i<N;i++){
+    const b0=Math.floor((i/N)*maxBin), b1=Math.floor(((i+1)/N)*maxBin);
+    let m=0; for(let b=b0;b<=b1;b++) if(fftData[b]>m)m=fftData[b];
+    pts.push((m/255));
   }
+  // smooth filled curve, warm gold gradient
+  const grad=cx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'rgba(205,162,101,.55)');
+  grad.addColorStop(1,'rgba(205,162,101,.02)');
+  cx.beginPath();
+  cx.moveTo(0,H);
+  for(let i=0;i<N;i++){
+    const x=(i/(N-1))*W, y=H-pts[i]*(H-2);
+    if(i===0)cx.lineTo(x,y);
+    else{
+      const px=((i-1)/(N-1))*W, py=H-pts[i-1]*(H-2);
+      cx.quadraticCurveTo(px,py,(px+x)/2,(py+y)/2);
+    }
+  }
+  cx.lineTo(W,H);cx.closePath();
+  cx.fillStyle=grad;cx.fill();
+  // top highlight line
+  cx.beginPath();
+  for(let i=0;i<N;i++){
+    const x=(i/(N-1))*W, y=H-pts[i]*(H-2);
+    i===0?cx.moveTo(x,y):cx.lineTo(x,y);
+  }
+  cx.strokeStyle='rgba(205,162,101,.8)';cx.lineWidth=1;cx.stroke();
 }
 
 const vp=document.getElementById('viewport');
