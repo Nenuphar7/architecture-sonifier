@@ -545,16 +545,34 @@ async function buildAudio(verts){
       for(;s<end;s++){
         const sx=tToScanX((s/STEPS)*DURATION);
         const t0=Math.round((s/STEPS)*total);
+        // True plane cross-section at x = sx (cut every triangle).
+        // Unlike sparse vertex sampling, this covers continuous flat
+        // surfaces such as the platform/plinth, which have thickness and
+        // are real architecture — so they should sound, not stay silent.
         const pts=[];
-        for(let i=0;i<NV;i++)
-          if(Math.abs(verts[i*3]-sx)<SLICE)
-            pts.push({y:verts[i*3+1],z:verts[i*3+2]});
+        const I=cachedIdx;
+        for(let t=0;t<I.length;t+=3){
+          const a=I[t]*3,b=I[t+1]*3,c=I[t+2]*3;
+          const ax=verts[a],bx=verts[b],cx=verts[c];
+          const da=ax-sx, db=bx-sx, dc=cx-sx;
+          let y0=0,z0=0,y1=0,z1=0,n=0;
+          if((da<0)!==(db<0)){const u=da/(da-db);const y=verts[a+1]+u*(verts[b+1]-verts[a+1]);const z=verts[a+2]+u*(verts[b+2]-verts[a+2]);if(n===0){y0=y;z0=z;}else{y1=y;z1=z;}n++;}
+          if((db<0)!==(dc<0)){const u=db/(db-dc);const y=verts[b+1]+u*(verts[c+1]-verts[b+1]);const z=verts[b+2]+u*(verts[c+2]-verts[b+2]);if(n===0){y0=y;z0=z;}else{y1=y;z1=z;}n++;}
+          if((dc<0)!==(da<0)){const u=dc/(dc-da);const y=verts[c+1]+u*(verts[a+1]-verts[c+1]);const z=verts[c+2]+u*(verts[a+2]-verts[c+2]);if(n===0){y0=y;z0=z;}else{y1=y;z1=z;}n++;}
+          if(n===2)pts.push({y:(y0+y1)*0.5,z:(z0+z1)*0.5});
+        }
         if(!pts.length)continue;
-        for(const p of pts){
+        // cap synthesis cost: stride-sample dense slices down to ~400 points
+        let use=pts;
+        if(pts.length>400){
+          use=[];const stride=pts.length/400;
+          for(let k=0;k<400;k++)use.push(pts[Math.floor(k*stride)]);
+        }
+        for(const p of use){
           const freq=80+((p.y+0.65)/1.25)*1700;  // Y → pitch
           const zNorm=(p.z+1)*0.5;                // Z 0..1
           const harm=Math.round(1+zNorm*3);       // Z → harmonics 1..4
-          const amp=0.07/pts.length;
+          const amp=0.07/use.length;
           for(let h=1;h<=harm;h++){
             const ph=(2*Math.PI*freq*h)/SR;
             const hamp=amp*(1/h);
@@ -629,15 +647,22 @@ function freqToNote(f){
 
 // Compute pitch/timbre at the current scan slice directly from geometry.
 function computeReadout(scanX){
-  if(!cachedVerts)return null;
-  const V=cachedVerts,SLICE=0.03;
+  if(!cachedVerts||!cachedIdx)return null;
+  const V=cachedVerts,I=cachedIdx;
   let count=0, fLo=Infinity, fHi=-Infinity, zSum=0;
-  for(let i=0;i<NV;i++){
-    if(Math.abs(V[i*3]-scanX)<SLICE){
-      const y=V[i*3+1], z=V[i*3+2];
-      const freq=80+((y+0.65)/1.25)*1700;
+  for(let t=0;t<I.length;t+=3){
+    const a=I[t]*3,b=I[t+1]*3,c=I[t+2]*3;
+    const ax=V[a],bx=V[b],cx=V[c];
+    const da=ax-scanX, db=bx-scanX, dc=cx-scanX;
+    let y0=0,z0=0,y1=0,z1=0,n=0;
+    if((da<0)!==(db<0)){const u=da/(da-db);const y=V[a+1]+u*(V[b+1]-V[a+1]);const z=V[a+2]+u*(V[b+2]-V[a+2]);if(n===0){y0=y;z0=z;}else{y1=y;z1=z;}n++;}
+    if((db<0)!==(dc<0)){const u=db/(db-dc);const y=V[b+1]+u*(V[c+1]-V[b+1]);const z=V[b+2]+u*(V[c+2]-V[b+2]);if(n===0){y0=y;z0=z;}else{y1=y;z1=z;}n++;}
+    if((dc<0)!==(da<0)){const u=dc/(dc-da);const y=V[c+1]+u*(V[a+1]-V[c+1]);const z=V[c+2]+u*(V[a+2]-V[c+2]);if(n===0){y0=y;z0=z;}else{y1=y;z1=z;}n++;}
+    if(n===2){
+      const my=(y0+y1)*0.5, mz=(z0+z1)*0.5;
+      const freq=80+((my+0.65)/1.25)*1700;
       if(freq<fLo)fLo=freq; if(freq>fHi)fHi=freq;
-      zSum+=z; count++;
+      zSum+=mz; count++;
     }
   }
   if(!count)return {count:0};
