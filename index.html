@@ -288,7 +288,7 @@ function buildScene(verts,indices){
   geo.setIndex(new THREE.BufferAttribute(indices,1));
   geo.computeVertexNormals();
 
-  solidMesh=new THREE.Mesh(geo,new THREE.MeshPhongMaterial({color:0xf2f5fa,emissive:0x202833,transparent:true,opacity:0.75,side:THREE.DoubleSide,depthWrite:true}));
+  solidMesh=new THREE.Mesh(geo,new THREE.MeshPhongMaterial({color:0xf2f5fa,emissive:0x202833,transparent:true,opacity:0.88,side:THREE.DoubleSide,depthWrite:true}));
   solidMesh.visible=true;
   scene.add(solidMesh);
   scene.add(new THREE.AmbientLight(0x3060a0,0.5));
@@ -578,7 +578,7 @@ function playFrom(off){
   src=audioCtx.createBufferSource();src.buffer=audioBuf;src.connect(analyser);
   const safe=Math.max(0,Math.min(off,DURATION-0.01));
   src.start(0,safe);ctxT0=audioCtx.currentTime;playOff=safe;
-  src.onended=()=>{if(playing){playing=false;updBtn();setProgress(0);}};
+  src.onended=()=>{if(playing){playing=false;updBtn();setProgress(0);playOff=0;}src=null;};
 }
 function stopAudio(){if(src){try{src.stop()}catch(e){}src=null;}}
 function curPos(){return playing?playOff+(audioCtx.currentTime-ctxT0):playOff;}
