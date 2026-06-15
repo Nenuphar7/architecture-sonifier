@@ -179,7 +179,7 @@ void main(){
   vec3 cp=vec3(1.00,0.58,0.18);
   vColor=mix(cb,ca,aura);
   vColor=mix(vColor,cp,edge);
-  vAlpha=0.15+0.85*aura;
+  vAlpha=clamp(0.95*aura+edge, 0.0, 1.0);
   vec4 mv=modelViewMatrix*vec4(position,1.0);
   float ps=(1.0+6.5*edge+1.2*aura)*260.0/(-mv.z);
   gl_PointSize=clamp(ps,0.3,10.0);
