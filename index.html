@@ -537,7 +537,7 @@ async function buildAudio(verts){
   const total=Math.round(DURATION*SR);
   const buf=audioCtx.createBuffer(1,total,SR);
   const ch=buf.getChannelData(0);
-  const STEPS=120,stepS=Math.round(total/STEPS),SLICE=0.03;
+  const STEPS=120,stepS=Math.round(total/STEPS);
   await new Promise(resolve=>{
     let s=0;
     function run(){
