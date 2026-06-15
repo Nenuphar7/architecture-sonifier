@@ -62,7 +62,25 @@ html,body{height:100%;background:var(--ink);color:var(--text);font-family:system
 #progress::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;border-radius:50%;background:var(--accent2);box-shadow:0 0 8px var(--accent2)}
 #trow{display:flex;justify-content:space-between;font-size:10px;color:var(--dim);font-family:monospace}
 #cur{color:var(--accent2)}
-#scope{width:110px;height:30px;flex-shrink:0;opacity:.7}
+
+/* Live readout in sidebar */
+.readout{display:flex;flex-direction:column;gap:9px}
+.rrow{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.rlabel{font-size:10px;letter-spacing:.08em;text-transform:uppercase;font-family:monospace;color:var(--dim)}
+.rval{font-size:13px;font-family:monospace;font-weight:600;font-variant-numeric:tabular-nums}
+.rval.pitch{color:var(--accent)}
+.rval.timbre{color:#9b7fff}
+.rval.note{color:#cdd6ec;font-size:11px}
+.rbar{position:relative;height:4px;border-radius:2px;background:rgba(255,255,255,.06);overflow:hidden;margin-top:3px}
+.rbar > i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;transition:width .08s linear}
+.rbar.pitch > i{background:var(--accent)}
+.rbar.timbre > i{background:#9b7fff}
+
+/* Analysis panel (scope + FFT) */
+.analysis{display:flex;flex-direction:column;gap:8px}
+.acanvaswrap{position:relative;background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.acanvaswrap canvas{display:block;width:100%}
+.acap{position:absolute;top:4px;left:7px;font-size:8px;letter-spacing:.12em;text-transform:uppercase;font-family:monospace;color:var(--muted);pointer-events:none}
 </style>
 </head>
 <body>
@@ -94,6 +112,34 @@ html,body{height:100%;background:var(--ink);color:var(--text);font-family:system
       <div class="crow">Solid fill<label class="toggle"><input type="checkbox" id="solidT" checked><span class="track"></span></label></div>
     </div>
   </div>
+  <div>
+    <div class="slabel">Live readout</div>
+    <div class="readout">
+      <div>
+        <div class="rrow"><span class="rlabel">Pitch</span><span class="rval pitch" id="ro-pitch">— Hz</span></div>
+        <div class="rbar pitch"><i id="ro-pitch-bar" style="width:0%"></i></div>
+      </div>
+      <div>
+        <div class="rrow"><span class="rlabel">Timbre</span><span class="rval timbre" id="ro-timbre">—</span></div>
+        <div class="rbar timbre"><i id="ro-timbre-bar" style="width:0%"></i></div>
+      </div>
+      <div class="rrow"><span class="rlabel">Note</span><span class="rval note" id="ro-note">—</span></div>
+      <div class="rrow"><span class="rlabel">Voices</span><span class="rval note" id="ro-voices">0</span></div>
+    </div>
+  </div>
+  <div>
+    <div class="slabel">Analysis</div>
+    <div class="analysis">
+      <div class="acanvaswrap">
+        <canvas id="scope" width="178" height="54"></canvas>
+        <span class="acap">Waveform</span>
+      </div>
+      <div class="acanvaswrap">
+        <canvas id="fft" width="178" height="64"></canvas>
+        <span class="acap">Spectrum</span>
+      </div>
+    </div>
+  </div>
   <div class="spacer"></div>
   <div class="credit">Geometry scan<br>Additive synthesis<br>Y=pitch · Z=timbre</div>
 </aside>
@@ -119,7 +165,6 @@ html,body{height:100%;background:var(--ink);color:var(--text);font-family:system
     <input type="range" id="progress" min="0" max="1000" value="0">
     <div id="trow"><span id="cur">0.0 s</span><span>8.0 s</span></div>
   </div>
-  <canvas id="scope" width="110" height="30"></canvas>
 </div>
 </div>
 
@@ -464,10 +509,17 @@ function setScanX(x){
 
 // ── Audio: Y→pitch, Z→timbre (harmonics) ──────────────────────
 let audioCtx=null,audioBuf=null,src=null,ctxT0=0,playOff=0,playing=false;
+let analyser=null,fftData=null,timeData=null;
 
 async function buildAudio(verts){
   setStatus('synthesizing audio... 0%');
   audioCtx=new(window.AudioContext||window.webkitAudioContext)({sampleRate:SR});
+  analyser=audioCtx.createAnalyser();
+  analyser.fftSize=2048;
+  analyser.smoothingTimeConstant=0.75;
+  analyser.connect(audioCtx.destination);
+  fftData=new Uint8Array(analyser.frequencyBinCount);
+  timeData=new Uint8Array(analyser.fftSize);
   const total=Math.round(DURATION*SR);
   const buf=audioCtx.createBuffer(1,total,SR);
   const ch=buf.getChannelData(0);
@@ -515,7 +567,7 @@ function playFrom(off){
   if(!audioBuf)return;
   if(audioCtx.state==='suspended')audioCtx.resume();
   if(src){try{src.stop()}catch(e){}}
-  src=audioCtx.createBufferSource();src.buffer=audioBuf;src.connect(audioCtx.destination);
+  src=audioCtx.createBufferSource();src.buffer=audioBuf;src.connect(analyser);
   const safe=Math.max(0,Math.min(off,DURATION-0.01));
   src.start(0,safe);ctxT0=audioCtx.currentTime;playOff=safe;
   src.onended=()=>{if(playing){playing=false;updBtn();setProgress(0);}};
@@ -526,7 +578,9 @@ function curPos(){return playing?playOff+(audioCtx.currentTime-ctxT0):playOff;}
 function setProgress(t){
   document.getElementById('progress').value=Math.round((t/DURATION)*1000);
   document.getElementById('cur').textContent=t.toFixed(1)+' s';
-  setScanX((t/DURATION)*2-1);
+  const sx=(t/DURATION)*2-1;
+  setScanX(sx);
+  updateReadout(sx);
 }
 function updBtn(){
   const b=document.getElementById('play-btn');
@@ -556,24 +610,110 @@ document.getElementById('play-btn').addEventListener('click',()=>{
 document.getElementById('progress').addEventListener('input',e=>{
   const t=(e.target.value/1000)*DURATION;playOff=t;
   document.getElementById('cur').textContent=t.toFixed(1)+' s';
-  setScanX((t/DURATION)*2-1);
+  const sx=(t/DURATION)*2-1;
+  setScanX(sx);
+  updateReadout(sx);
   if(playing)playFrom(t);
 });
 document.getElementById('solidT').addEventListener('change',e=>{if(solidMesh)solidMesh.visible=e.target.checked;});
 
-function drawScope(t){
-  if(!audioBuf)return;
-  const cv=document.getElementById('scope'),cx=cv.getContext('2d');
-  cx.clearRect(0,0,110,30);
-  const ch=audioBuf.getChannelData(0),hw=Math.round(0.04*SR);
-  const c=Math.round(t*SR),s0=Math.max(0,c-hw),s1=Math.min(ch.length-1,c+hw);
+// Frequency → nearest note name
+function freqToNote(f){
+  if(!f||f<=0)return '—';
+  const n=Math.round(12*Math.log2(f/440)+69);
+  const names=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  const name=names[((n%12)+12)%12];
+  const oct=Math.floor(n/12)-1;
+  return name+oct;
+}
+
+// Compute pitch/timbre at the current scan slice directly from geometry.
+function computeReadout(scanX){
+  if(!cachedVerts)return null;
+  const V=cachedVerts,SLICE=0.03;
+  let count=0, fLo=Infinity, fHi=-Infinity, zSum=0;
+  for(let i=0;i<NV;i++){
+    if(Math.abs(V[i*3]-scanX)<SLICE){
+      const y=V[i*3+1], z=V[i*3+2];
+      const freq=80+((y+0.65)/1.25)*1700;
+      if(freq<fLo)fLo=freq; if(freq>fHi)fHi=freq;
+      zSum+=z; count++;
+    }
+  }
+  if(!count)return {count:0};
+  const zAvg=zSum/count;
+  const harm=Math.round(1+((zAvg+1)*0.5)*3); // 1..4 (matches synth)
+  return {count, fLo, fHi, fMid:(fLo+fHi)*0.5, harm};
+}
+
+function updateReadout(scanX){
+  const r=computeReadout(scanX);
+  const pEl=document.getElementById('ro-pitch');
+  const pBar=document.getElementById('ro-pitch-bar');
+  const tEl=document.getElementById('ro-timbre');
+  const tBar=document.getElementById('ro-timbre-bar');
+  const nEl=document.getElementById('ro-note');
+  const vEl=document.getElementById('ro-voices');
+  if(!r||!r.count){
+    pEl.textContent='— Hz'; pBar.style.width='0%';
+    tEl.textContent='—'; tBar.style.width='0%';
+    nEl.textContent='—'; vEl.textContent='0';
+    return;
+  }
+  pEl.textContent=Math.round(r.fLo)+'–'+Math.round(r.fHi)+' Hz';
+  // map fMid (80..1780) → 0..100%
+  pBar.style.width=Math.max(0,Math.min(100,((r.fMid-80)/1700)*100)).toFixed(0)+'%';
+  const tn=['pure','warm','rich','full'][r.harm-1]||'—';
+  tEl.textContent=r.harm+'  ('+tn+')';
+  tBar.style.width=(((r.harm-1)/3)*100).toFixed(0)+'%';
+  nEl.textContent=freqToNote(r.fMid);
+  vEl.textContent=String(r.count);
+}
+
+function drawScope(){
+  const cv=document.getElementById('scope');
+  if(!cv)return;
+  const cx=cv.getContext('2d'),W=cv.width,H=cv.height;
+  cx.clearRect(0,0,W,H);
+  // baseline
+  cx.strokeStyle='rgba(255,255,255,.05)';cx.lineWidth=1;
+  cx.beginPath();cx.moveTo(0,H/2);cx.lineTo(W,H/2);cx.stroke();
+  if(!analyser||!playing){return;}
+  analyser.getByteTimeDomainData(timeData);
   cx.strokeStyle='#ff8c42';cx.lineWidth=1.5;cx.beginPath();
-  for(let px=0;px<110;px++){
-    const si=Math.round(s0+(px/110)*(s1-s0));
-    const y=15-(ch[si]||0)*13;
+  const step=timeData.length/W;
+  for(let px=0;px<W;px++){
+    const v=(timeData[Math.floor(px*step)]-128)/128; // -1..1
+    const y=H/2 - v*(H/2-2);
     px===0?cx.moveTo(px,y):cx.lineTo(px,y);
   }
   cx.stroke();
+}
+
+function drawFFT(){
+  const cv=document.getElementById('fft');
+  if(!cv)return;
+  const cx=cv.getContext('2d'),W=cv.width,H=cv.height;
+  cx.clearRect(0,0,W,H);
+  if(!analyser||!playing)return;
+  analyser.getByteFrequencyData(fftData);
+  // show up to ~4 kHz (where our content lives) on a mild log-ish scale
+  const nyq=audioCtx.sampleRate/2;
+  const maxHz=4000, maxBin=Math.min(fftData.length, Math.floor(maxHz/nyq*fftData.length));
+  const bars=64, binsPer=maxBin/bars, bw=W/bars;
+  for(let b=0;b<bars;b++){
+    let m=0;
+    const start=Math.floor(b*binsPer), end=Math.floor((b+1)*binsPer);
+    for(let i=start;i<end;i++) if(fftData[i]>m)m=fftData[i];
+    const h=(m/255)*(H-2);
+    // colour gradient cyan→violet across spectrum
+    const t=b/bars;
+    const r=Math.round(61+ (155-61)*t);
+    const g=Math.round(184+(127-184)*t);
+    const bl=Math.round(255+(255-255)*t);
+    cx.fillStyle=`rgb(${r},${g},${bl})`;
+    cx.fillRect(b*bw, H-h, Math.max(1,bw-1), h);
+  }
 }
 
 const vp=document.getElementById('viewport');
@@ -622,8 +762,10 @@ function animate(){
   if(playing){
     const p=curPos();
     if(p>=DURATION){playing=false;updBtn();setProgress(0);}
-    else{setProgress(p);drawScope(p);}
+    else{setProgress(p);}
   }
+  drawScope();   // live waveform from analyser
+  drawFFT();     // live spectrum from analyser
   updateLabels(); // reproject axis labels every frame
   renderer.render(scene,camera);
 }
@@ -639,7 +781,10 @@ async function init(){
     setStatus('building mesh...');
     await new Promise(r=>setTimeout(r,30));
     buildScene(verts,indices);
-    setScanX(-1.6);
+    setScanX(0.0);
+    updateReadout(0.0);
+    document.getElementById('progress').value=500;
+    document.getElementById('cur').textContent='4.0 s';
     await buildAudio(verts);
     document.getElementById('loading').classList.add('hidden');
     setTimeout(()=>{document.getElementById('loading').style.display='none';},800);
