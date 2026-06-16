@@ -751,16 +751,21 @@ async function buildAudio(verts){
   });
 }
 
+let playToken=0;
 function playFrom(off){
   if(!audioBuf)return;
   if(audioCtx.state==='suspended')audioCtx.resume();
-  if(src){try{src.stop()}catch(e){}}
+  if(src){src.onended=null;try{src.stop()}catch(e){}src=null;}
+  const myToken=++playToken;
   src=audioCtx.createBufferSource();src.buffer=audioBuf;src.connect(analyser);
   const safe=Math.max(0,Math.min(off,DURATION-0.01));
   src.start(0,safe);ctxT0=audioCtx.currentTime;playOff=safe;
-  src.onended=()=>{if(playing){playing=false;updBtn();setProgress(0);playOff=0;}src=null;};
+  src.onended=()=>{
+    if(myToken!==playToken)return;          // a newer source took over → ignore
+    playing=false;updBtn();setProgress(0);playOff=0;src=null;
+  };
 }
-function stopAudio(){if(src){try{src.stop()}catch(e){}src=null;}}
+function stopAudio(){if(src){src.onended=null;try{src.stop()}catch(e){}src=null;}}
 function curPos(){return playing?playOff+(audioCtx.currentTime-ctxT0):playOff;}
 
 function setProgress(t){
@@ -777,9 +782,16 @@ function updBtn(){
 }
 
 document.getElementById('play-btn').addEventListener('click',()=>{
-  if(!audioBuf)return;playing=!playing;updBtn();
-  if(playing){playFrom((document.getElementById('progress').value/1000)*DURATION);}
-  else{const p=curPos();stopAudio();playOff=p;}
+  if(!audioBuf)return;
+  if(!playing){
+    playing=true;updBtn();
+    let t=(document.getElementById('progress').value/1000)*DURATION;
+    if(t>=DURATION-0.02)t=0;                 // finished → replay from start
+    playFrom(t);
+  }else{
+    playing=false;updBtn();
+    const p=curPos();stopAudio();playOff=p;
+  }
 });
 document.getElementById('progress').addEventListener('input',e=>{
   const t=(e.target.value/1000)*DURATION;playOff=t;
@@ -917,7 +929,7 @@ function animate(){
   requestAnimationFrame(animate);
   if(playing){
     const p=curPos();
-    if(p>=DURATION){playing=false;updBtn();setProgress(0);}
+    if(p>=DURATION){stopAudio();playing=false;updBtn();setProgress(0);playOff=0;}
     else{setProgress(p);}
   }
   drawScope();   // live waveform from analyser
