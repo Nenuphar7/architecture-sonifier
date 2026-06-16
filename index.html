@@ -44,8 +44,15 @@ html,body{height:100%;background:var(--ink);color:var(--text);font-family:system
   text-shadow:0 0 8px currentColor;
 }
 #ax-time  {color:#ff8c42}
-#ax-pitch {color:#3db8ff}
+#ax-pitch {color:#cdd6ec}
 #ax-timbre{color:#9b7fff}
+.ticklabel{
+  position:absolute;pointer-events:none;white-space:nowrap;
+  font-family:monospace;font-size:9px;font-weight:500;letter-spacing:.04em;
+  color:#8595b8;text-shadow:0 0 6px #000;
+}
+.ticklabel.freq{color:#aab8d8;text-align:right}
+.ticklabel.time{color:#c79a78}
 
 #loading{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--ink);z-index:10;gap:14px;transition:opacity .7s}
 #loading.hidden{opacity:0;pointer-events:none}
@@ -132,12 +139,8 @@ html,body{height:100%;background:var(--ink);color:var(--text);font-family:system
     <div class="slabel">Analysis</div>
     <div class="analysis">
       <div class="acanvaswrap">
-        <canvas id="scope" width="178" height="54"></canvas>
+        <canvas id="scope" width="178" height="58"></canvas>
         <span class="acap">Waveform</span>
-      </div>
-      <div class="acanvaswrap">
-        <canvas id="fft" width="178" height="64"></canvas>
-        <span class="acap">Spectrum</span>
       </div>
     </div>
   </div>
@@ -149,7 +152,7 @@ html,body{height:100%;background:var(--ink);color:var(--text);font-family:system
   <canvas id="canvas"></canvas>
   <!-- Axis labels — repositioned each frame via JS projection -->
   <div id="ax-time"   class="axlabel">time →</div>
-  <div id="ax-pitch"  class="axlabel">pitch ↑</div>
+  <div id="ax-pitch"  class="axlabel">frequency ↑</div>
   <div id="ax-timbre" class="axlabel">timbre ↗</div>
   <div id="loading">
     <div class="ring"></div>
@@ -221,6 +224,46 @@ const AX_TIME_TIP   = new THREE.Vector3( 1.35,-0.66,-1.45); // X end
 const AX_PITCH_TIP  = new THREE.Vector3(SCAN_MIN, 0.80,-1.45); // Y end
 const AX_TIMBRE_TIP = new THREE.Vector3(SCAN_MIN,-0.66, 1.35); // Z end
 
+// ── SPECTROGRAM FRAMING ───────────────────────────────────────
+// The building IS the spectrogram: TIME (X) × FREQUENCY (Y, height) × TIMBRE (Z).
+// Height maps to frequency on a LOG scale (matches musical pitch + spectrogram axis).
+const Y_BOT=-0.6, Y_TOP=0.6;          // model vertical extent
+const F_MIN=80, F_MAX=2000;           // frequency range mapped to that height
+const yToFreq=y=>{const t=Math.min(1,Math.max(0,(y-Y_BOT)/(Y_TOP-Y_BOT)));return F_MIN*Math.pow(F_MAX/F_MIN,t);};
+const freqToY=f=>Y_BOT+(Y_TOP-Y_BOT)*Math.log(f/F_MIN)/Math.log(F_MAX/F_MIN);
+const FREQ_TICKS=[100,200,500,1000,2000];
+const freqLabel=f=>f>=1000?(f/1000)+'k':''+f;
+const TIME_TICKS=[0,2,4,6,8,10,12];
+
+// Cage (wireframe box) bounds
+const Y_FLOOR=-0.63, Y_CEIL=0.62;
+const Z_BACK=-1.45, Z_FRONT=1.30, X_RIGHT=SCAN_MAX;
+const xForTime=t=>tToScanX(t);
+
+// blue → cyan → green → yellow → red colormap (spectrogram palette)
+function spectroColor(t){
+  t=Math.min(1,Math.max(0,t));
+  const stops=[
+    [0.00, 0x18, 0x3a, 0xb0],
+    [0.25, 0x20, 0xb0, 0xcf],
+    [0.50, 0x34, 0xc8, 0x6a],
+    [0.75, 0xe6, 0xcf, 0x38],
+    [1.00, 0xe2, 0x3b, 0x33]
+  ];
+  for(let i=0;i<stops.length-1;i++){
+    const a=stops[i],b=stops[i+1];
+    if(t>=a[0]&&t<=b[0]){
+      const u=(t-a[0])/(b[0]-a[0]);
+      return new THREE.Color(
+        (a[1]+(b[1]-a[1])*u)/255,
+        (a[2]+(b[2]-a[2])*u)/255,
+        (a[3]+(b[3]-a[3])*u)/255
+      );
+    }
+  }
+  return new THREE.Color(1,0,0);
+}
+
 function setStatus(s){document.getElementById('lst').textContent=s}
 function decodeF32(b){const bin=atob(b),buf=new ArrayBuffer(bin.length),u8=new Uint8Array(buf);for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);return new Float32Array(buf)}
 function decodeU32(b){const bin=atob(b),buf=new ArrayBuffer(bin.length),u8=new Uint8Array(buf);for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);return new Uint32Array(buf)}
@@ -242,15 +285,64 @@ function initScene(){
   renderer.setSize(vp.clientWidth,vp.clientHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
 
-  // Grid
-  const grid=new THREE.GridHelper(4,24,0x111826,0x0c1320);
-  grid.position.y=-0.67;
-  scene.add(grid);
+  // ── Spectrogram cage: floor + back wall + left wall ──
+  buildCage();
+}
 
-  // Axes — arrows along the bounding-box edges, outside the model
-  addArrow(new THREE.Vector3(1,0,0), AX_ORIGIN, (1.35-SCAN_MIN), 0xff8c42); // TIME  (X)
-  addArrow(new THREE.Vector3(0,1,0), AX_ORIGIN, 1.50,            0x3db8ff); // PITCH (Y)
-  addArrow(new THREE.Vector3(0,0,1), AX_ORIGIN, 2.80,            0x9b7fff); // TIMBRE (Z)
+// Faint gridded cage that frames the model as a spectrogram volume.
+function buildCage(){
+  const seg=[];                 // flat [x0,y0,z0, x1,y1,z1, ...]
+  const L=(a,b)=>{seg.push(a.x,a.y,a.z,b.x,b.y,b.z);};
+  const V=(x,y,z)=>new THREE.Vector3(x,y,z);
+
+  const xs=TIME_TICKS.map(xForTime);
+  const ys=FREQ_TICKS.map(freqToY);
+  // a few timbre subdivisions for the floor/side depth
+  const zs=[]; for(let i=0;i<=6;i++) zs.push(Z_BACK+(Z_FRONT-Z_BACK)*i/6);
+
+  // FLOOR (y=Y_FLOOR): lines along time (const x) and along depth (const z)
+  for(const x of xs) L(V(x,Y_FLOOR,Z_BACK), V(x,Y_FLOOR,Z_FRONT));
+  for(const z of zs) L(V(SCAN_MIN,Y_FLOOR,z), V(X_RIGHT,Y_FLOOR,z));
+
+  // BACK WALL (z=Z_BACK): vertical lines at time ticks, horizontal at freq ticks
+  for(const x of xs) L(V(x,Y_FLOOR,Z_BACK), V(x,Y_CEIL,Z_BACK));
+  for(const y of ys) L(V(SCAN_MIN,y,Z_BACK), V(X_RIGHT,y,Z_BACK));
+  // frame top edge of back wall
+  L(V(SCAN_MIN,Y_CEIL,Z_BACK), V(X_RIGHT,Y_CEIL,Z_BACK));
+
+  // LEFT WALL (x=SCAN_MIN): horizontal at freq ticks, depth lines at z subdivisions
+  for(const y of ys) L(V(SCAN_MIN,y,Z_BACK), V(SCAN_MIN,y,Z_FRONT));
+  for(const z of zs) L(V(SCAN_MIN,Y_FLOOR,z), V(SCAN_MIN,Y_CEIL,z));
+  L(V(SCAN_MIN,Y_CEIL,Z_BACK), V(SCAN_MIN,Y_CEIL,Z_FRONT));
+
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(seg,3));
+  scene.add(new THREE.LineSegments(g,new THREE.LineBasicMaterial({
+    color:0x39476a, transparent:true, opacity:0.5
+  })));
+
+  // Build projected HTML tick labels (frequency + time)
+  buildTickLabels();
+}
+
+// Create DOM tick labels; positions are projected each frame in updateLabels()
+let freqTickEls=[], timeTickEls=[];
+function buildTickLabels(){
+  const vp=document.getElementById('viewport');
+  FREQ_TICKS.forEach(f=>{
+    const d=document.createElement('div');
+    d.className='ticklabel freq';
+    d.textContent=freqLabel(f)+' Hz';
+    d.dataset.world=JSON.stringify([SCAN_MIN,freqToY(f),Z_BACK]);
+    vp.appendChild(d); freqTickEls.push(d);
+  });
+  TIME_TICKS.forEach(t=>{
+    const d=document.createElement('div');
+    d.className='ticklabel time';
+    d.textContent=t+' s';
+    d.dataset.world=JSON.stringify([xForTime(t),Y_FLOOR,Z_FRONT]);
+    vp.appendChild(d); timeTickEls.push(d);
+  });
 }
 function addArrow(dir,origin,len,color){
   const mat=new THREE.MeshBasicMaterial({color});
@@ -300,6 +392,18 @@ function updateLabels(){
   place('ax-time',   AX_TIME_TIP,   8, -10);
   place('ax-pitch',  AX_PITCH_TIP,  8, -10);
   place('ax-timbre', AX_TIMBRE_TIP, 4,   4);
+  // tick labels
+  const tmp=new THREE.Vector3();
+  for(const d of freqTickEls){
+    const w=JSON.parse(d.dataset.world);
+    const p=project(tmp.set(w[0],w[1],w[2]));
+    d.style.left=(p.x-4)+'px'; d.style.top=(p.y-7)+'px';
+  }
+  for(const d of timeTickEls){
+    const w=JSON.parse(d.dataset.world);
+    const p=project(tmp.set(w[0],w[1],w[2]));
+    d.style.left=(p.x-8)+'px'; d.style.top=(p.y+6)+'px';
+  }
 }
 
 function buildScene(verts,indices){
@@ -308,11 +412,27 @@ function buildScene(verts,indices){
   geo.setIndex(new THREE.BufferAttribute(indices,1));
   geo.computeVertexNormals();
 
-  solidMesh=new THREE.Mesh(geo,new THREE.MeshPhongMaterial({color:0xf2f5fa,emissive:0x202833,transparent:true,opacity:0.88,side:THREE.DoubleSide,depthWrite:true}));
+  // Per-vertex colour by HEIGHT (= frequency): blue (low) → red (high).
+  // This makes the building read as its own spectrogram.
+  const colArr=new Float32Array(verts.length);
+  for(let i=0;i<verts.length;i+=3){
+    const y=verts[i+1];
+    const t=(y-Y_BOT)/(Y_TOP-Y_BOT);
+    const c=spectroColor(t);
+    colArr[i]=c.r; colArr[i+1]=c.g; colArr[i+2]=c.b;
+  }
+  geo.setAttribute('color',new THREE.BufferAttribute(colArr,3));
+
+  solidMesh=new THREE.Mesh(geo,new THREE.MeshPhongMaterial({
+    vertexColors:true, shininess:6, specular:0x111111,
+    transparent:true, opacity:0.95, side:THREE.DoubleSide, depthWrite:true
+  }));
   solidMesh.visible=true;
   scene.add(solidMesh);
-  scene.add(new THREE.AmbientLight(0x3060a0,0.5));
-  const pt=new THREE.PointLight(0x3db8ff,0.7,8);pt.position.set(0,2,2);scene.add(pt);
+  // Neutral lighting so colormap shows true hues, with gentle form shading
+  scene.add(new THREE.AmbientLight(0xffffff,0.72));
+  const d1=new THREE.DirectionalLight(0xffffff,0.55); d1.position.set(1.2,2.0,1.6); scene.add(d1);
+  const d2=new THREE.DirectionalLight(0xbfd0ff,0.25); d2.position.set(-1.5,0.6,-1.2); scene.add(d2);
 
   // Points (scan shader — no labels, just glow)
   const pgeo=new THREE.BufferGeometry();
@@ -569,7 +689,7 @@ async function buildAudio(verts){
           for(let k=0;k<280;k++)use.push(pts[Math.floor(k*stride)]);
         }
         for(const p of use){
-          const freq=80+((p.y+0.65)/1.25)*1700;  // Y → pitch
+          const freq=yToFreq(p.y);                // Y → frequency (log)
           const zNorm=(p.z+1)*0.5;                // Z 0..1
           const harm=Math.round(1+zNorm*3);       // Z → harmonics 1..4
           const amp=0.07/use.length;
@@ -665,7 +785,7 @@ function computeReadout(scanX){
     if((dc<0)!==(da<0)){const u=dc/(dc-da);const y=V[c+1]+u*(V[a+1]-V[c+1]);const z=V[c+2]+u*(V[a+2]-V[c+2]);if(n===0){y0=y;z0=z;}else{y1=y;z1=z;}n++;}
     if(n===2){
       const my=(y0+y1)*0.5, mz=(z0+z1)*0.5;
-      const freq=80+((my+0.65)/1.25)*1700;
+      const freq=yToFreq(my);
       if(freq<fLo)fLo=freq; if(freq>fHi)fHi=freq;
       zSum+=mz; count++;
     }
@@ -692,7 +812,7 @@ function updateReadout(scanX){
   }
   pEl.textContent=Math.round(r.fLo)+'–'+Math.round(r.fHi)+' Hz';
   // map fMid (80..1780) → 0..100%
-  pBar.style.width=Math.max(0,Math.min(100,((r.fMid-80)/1700)*100)).toFixed(0)+'%';
+  pBar.style.width=Math.max(0,Math.min(100,((freqToY(r.fMid)-Y_BOT)/(Y_TOP-Y_BOT))*100)).toFixed(0)+'%';
   const tn=['pure','warm','rich','full'][r.harm-1]||'—';
   tEl.textContent=r.harm+'  ('+tn+')';
   tBar.style.width=(((r.harm-1)/3)*100).toFixed(0)+'%';
@@ -720,31 +840,6 @@ function drawScope(){
   cx.stroke();
 }
 
-function drawFFT(){
-  const cv=document.getElementById('fft');
-  if(!cv)return;
-  const cx=cv.getContext('2d'),W=cv.width,H=cv.height;
-  cx.clearRect(0,0,W,H);
-  if(!analyser||!playing)return;
-  analyser.getByteFrequencyData(fftData);
-  // show up to ~4 kHz (where our content lives) on a mild log-ish scale
-  const nyq=audioCtx.sampleRate/2;
-  const maxHz=4000, maxBin=Math.min(fftData.length, Math.floor(maxHz/nyq*fftData.length));
-  const bars=64, binsPer=maxBin/bars, bw=W/bars;
-  for(let b=0;b<bars;b++){
-    let m=0;
-    const start=Math.floor(b*binsPer), end=Math.floor((b+1)*binsPer);
-    for(let i=start;i<end;i++) if(fftData[i]>m)m=fftData[i];
-    const h=(m/255)*(H-2);
-    // colour gradient cyan→violet across spectrum
-    const t=b/bars;
-    const r=Math.round(61+ (155-61)*t);
-    const g=Math.round(184+(127-184)*t);
-    const bl=Math.round(255+(255-255)*t);
-    cx.fillStyle=`rgb(${r},${g},${bl})`;
-    cx.fillRect(b*bw, H-h, Math.max(1,bw-1), h);
-  }
-}
 
 const vp=document.getElementById('viewport');
 vp.addEventListener('mousedown',e=>{isDragging=true;prev={x:e.clientX,y:e.clientY};});
@@ -795,7 +890,6 @@ function animate(){
     else{setProgress(p);}
   }
   drawScope();   // live waveform from analyser
-  drawFFT();     // live spectrum from analyser
   updateLabels(); // reproject axis labels every frame
   renderer.render(scene,camera);
 }
