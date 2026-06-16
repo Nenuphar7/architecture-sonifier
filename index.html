@@ -626,7 +626,15 @@ function updateProfile(scanX){
     }
   }
   if(raw.length===0){
-    profileLines.geometry.setDrawRange(0,0);
+    // Silent lead-in / out: no geometry at this slice. Instead of vanishing,
+    // show the profile as a flat white line at the very bottom of the
+    // frequency axis, moving with the scan — so the user sees playback running
+    // before the scan reaches the building.
+    const baseY=Y_BOT;                       // lowest frequency
+    const ground=[baseY,-0.6, baseY,0.6];    // [y,z] pairs across depth
+    const o=emitRibbon(arr,0,scanX,ground,W,false,maxFloats);
+    profileLines.geometry.setDrawRange(0,o/3);
+    profileLines.geometry.attributes.position.needsUpdate=true;
     return;
   }
 
