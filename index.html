@@ -45,7 +45,7 @@ html,body{height:100%;background:var(--ink);color:var(--text);font-family:system
 }
 #ax-time  {color:#c8ccd2}
 #ax-pitch {color:#c8ccd2}
-#ax-timbre{color:#c8ccd2}
+#ax-timbre{color:#c8ccd2;transform:translateX(-100%)}
 .ticklabel{
   position:absolute;pointer-events:none;white-space:nowrap;
   font-family:monospace;font-size:9px;font-weight:500;letter-spacing:.04em;
@@ -422,7 +422,7 @@ function updateLabels(){
   }
   place('ax-time',   AX_TIME_TIP,   8, -10);
   place('ax-pitch',  AX_PITCH_TIP,  8, -10);
-  place('ax-timbre', AX_TIMBRE_TIP, 4,   4);
+  place('ax-timbre', AX_TIMBRE_TIP, -6,   4);
   // tick labels
   const tmp=new THREE.Vector3();
   for(const d of freqTickEls){
