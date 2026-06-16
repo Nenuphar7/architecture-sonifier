@@ -151,7 +151,7 @@ html,body{height:100%;background:var(--ink);color:var(--text);font-family:system
 <div id="viewport">
   <canvas id="canvas"></canvas>
   <!-- Axis labels — repositioned each frame via JS projection -->
-  <div id="ax-time"   class="axlabel">time →</div>
+  <div id="ax-time"   class="axlabel">← time</div>
   <div id="ax-pitch"  class="axlabel">frequency ↑</div>
   <div id="ax-timbre" class="axlabel">timbre ↗</div>
   <div id="loading">
@@ -207,14 +207,14 @@ const NV=11846;
 const DURATION=12.0,SR=22050;
 
 // Scan domain along TIME (X). The building occupies X[-1,1].
-// We start the scan BEFORE the building and end slightly AFTER, so the
-// sound has a silent lead-in/out and it's clear when the scan reaches it.
-const SCAN_LEAD=0.45;                 // silent run-up before the building
-const SCAN_TAIL=0.18;                 // small run-out after
-const SCAN_MIN=-1-SCAN_LEAD;          // timeline start (silent)
-const SCAN_MAX= 1+SCAN_TAIL;          // timeline end
+// The track follows a visitor walking IN from the gate: time starts at the
+// main facade (high-X side) with a silent approach, then moves through to the rear.
+const SCAN_APPROACH=0.45;             // silent run-up before the main facade
+const SCAN_EXIT=0.18;                 // short run-out past the rear
+const SCAN_MIN=-1-SCAN_EXIT;          // rear / end of the walk (low X)
+const SCAN_MAX= 1+SCAN_APPROACH;      // approach start, main facade (high X)
 const SCAN_SPAN=SCAN_MAX-SCAN_MIN;
-const tToScanX=t=>SCAN_MIN+(t/DURATION)*SCAN_SPAN;   // seconds → scanX
+const tToScanX=t=>SCAN_MAX-(t/DURATION)*SCAN_SPAN;   // t=0 at facade → walks inward
 
 // Axis label world-space endpoints (outside model bounding box)
 // Model: X[-1,1], Y[-0.6,0.6], Z[-1,1]
@@ -905,8 +905,8 @@ async function init(){
     setStatus('building mesh...');
     await new Promise(r=>setTimeout(r,30));
     buildScene(verts,indices);
-    setScanX(SCAN_MIN);
-    updateReadout(SCAN_MIN);
+    setScanX(tToScanX(0));
+    updateReadout(tToScanX(0));
     document.getElementById('progress').value=0;
     document.getElementById('cur').textContent='0.0 s';
     await buildAudio(verts);
