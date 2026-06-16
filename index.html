@@ -195,9 +195,9 @@ void main(){
   float dx=abs(position.x-scanX);
   float aura=exp(-dx*dx*28.0);
   float edge=exp(-dx*dx*4000.0);
-  vec3 cb=vec3(0.12,0.12,0.14);
-  vec3 ca=vec3(0.62,0.65,0.70);
-  vec3 cp=vec3(1.00,1.00,1.00);
+  vec3 cb=vec3(0.05,0.12,0.12);
+  vec3 ca=vec3(0.12,0.72,0.67);
+  vec3 cp=vec3(0.35,1.00,0.92);
   vColor=mix(cb,ca,aura);
   vColor=mix(vColor,cp,edge);
   vAlpha=clamp(0.95*aura+edge, 0.0, 1.0);
