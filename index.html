@@ -762,7 +762,7 @@ async function buildAudio(verts){
 let playToken=0;
 function playFrom(off){
   if(!audioBuf)return;
-  if(audioCtx.state==='suspended')audioCtx.resume();
+  if(audioCtx.state!=='running'){try{audioCtx.resume()}catch(e){}}
   if(src){src.onended=null;try{src.stop()}catch(e){}src=null;}
   const myToken=++playToken;
   src=audioCtx.createBufferSource();src.buffer=audioBuf;src.connect(analyser);
@@ -800,6 +800,19 @@ document.getElementById('play-btn').addEventListener('click',()=>{
     playing=false;updBtn();
     const p=curPos();stopAudio();playOff=p;
   }
+});
+
+// Mobile browsers suspend/interrupt the AudioContext when the tab is backgrounded.
+// Pause cleanly when leaving, and wake the context up on return so Play keeps working.
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){
+    if(playing){const p=curPos();stopAudio();playOff=p;playing=false;updBtn();}
+  }else{
+    if(audioCtx&&audioCtx.state!=='running'){audioCtx.resume().catch(()=>{});}
+  }
+});
+window.addEventListener('pageshow',()=>{
+  if(audioCtx&&audioCtx.state!=='running'){audioCtx.resume().catch(()=>{});}
 });
 document.getElementById('progress').addEventListener('input',e=>{
   const t=(e.target.value/1000)*DURATION;playOff=t;
