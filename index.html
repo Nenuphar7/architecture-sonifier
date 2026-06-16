@@ -192,11 +192,18 @@ uniform float scanX;
 varying vec3 vColor;
 varying float vAlpha;
 void main(){
-  vColor=vec3(1.0,1.0,1.0);
-  vAlpha=0.85;
+  float dx=abs(position.x-scanX);
+  float aura=exp(-dx*dx*28.0);
+  float edge=exp(-dx*dx*4000.0);
+  vec3 cb=vec3(0.12,0.12,0.14);
+  vec3 ca=vec3(0.62,0.65,0.70);
+  vec3 cp=vec3(1.00,1.00,1.00);
+  vColor=mix(cb,ca,aura);
+  vColor=mix(vColor,cp,edge);
+  vAlpha=clamp(0.95*aura+edge, 0.0, 1.0);
   vec4 mv=modelViewMatrix*vec4(position,1.0);
-  float ps=22.0/(-mv.z);
-  gl_PointSize=clamp(ps,2.5,7.0);
+  float ps=(1.0+6.5*edge+1.2*aura)*260.0/(-mv.z);
+  gl_PointSize=clamp(ps,0.3,10.0);
   gl_Position=projectionMatrix*mv;
 }
 </script>
@@ -458,13 +465,9 @@ function buildScene(verts,indices){
   const d1=new THREE.DirectionalLight(0xffffff,0.55); d1.position.set(1.2,2.0,1.6); scene.add(d1);
   const d2=new THREE.DirectionalLight(0xbfd0ff,0.25); d2.position.set(-1.5,0.6,-1.2); scene.add(d2);
 
-  // Points = the actual sound VOICES: midpoints of the cross-section at the
-  // scan plane (the same points that generate audio). Filled in updateProfile.
-  // All sit on x = scanX, so the proximity shader renders them at full glow.
+  // Points (scan shader — no labels, just glow)
   const pgeo=new THREE.BufferGeometry();
-  const MAXVOICE=4000;
-  pgeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(MAXVOICE*3),3));
-  pgeo.setDrawRange(0,0);
+  pgeo.setAttribute('position',new THREE.BufferAttribute(verts,3));
   scanU={value:-1.6};
   ptsMesh=new THREE.Points(pgeo,new THREE.ShaderMaterial({
     uniforms:{scanX:scanU},
@@ -624,25 +627,7 @@ function updateProfile(scanX){
   }
   if(raw.length===0){
     profileLines.geometry.setDrawRange(0,0);
-    ptsMesh.geometry.setDrawRange(0,0);
     return;
-  }
-
-  // Voice points = midpoint of every cross-section segment (== audio voices).
-  // Light up exactly what is sounding right now.
-  {
-    const parr=ptsMesh.geometry.attributes.position.array;
-    const cap=parr.length/3;
-    let vi=0;
-    for(const h of raw){
-      if(vi>=cap)break;
-      parr[vi*3]=scanX;
-      parr[vi*3+1]=(h[0]+h[2])*0.5;
-      parr[vi*3+2]=(h[1]+h[3])*0.5;
-      vi++;
-    }
-    ptsMesh.geometry.setDrawRange(0,vi);
-    ptsMesh.geometry.attributes.position.needsUpdate=true;
   }
 
   // platform = thin slab at the bottom. Its top edge ≈ yMin + slab thickness.
