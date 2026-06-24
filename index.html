@@ -504,7 +504,7 @@ function buildScene(verts,indices){
 function emitRibbon(arr,o,x,pts,w,closed,maxFloats){
   const n=pts.length/2;
   if(n<2)return o;
-  const H=0.016;  // half-thickness in X (total ~0.032 world units, ~1/3 of w)
+  const H=0.008;  // half-thickness in X (total ~0.016 world units)
   // precompute per-vertex normals (miter)
   const nx=new Float32Array(n), nz=new Float32Array(n);
   for(let i=0;i<n;i++){
