@@ -487,7 +487,7 @@ function buildScene(verts,indices){
   // Profile — true cross-section as THICK ribbon (quads in the Y-Z plane)
   const profGeo=new THREE.BufferGeometry();
   const maxSeg=4000;               // segments
-  profGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(maxSeg*6*3),3)); // 2 tris/seg
+  profGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(maxSeg*24*3),3)); // 8 tris/seg (4 quads)
   profGeo.setDrawRange(0,0);
   profileLines=new THREE.Mesh(profGeo,new THREE.MeshBasicMaterial({
     color:0xffffff,side:THREE.DoubleSide,depthWrite:true,depthTest:true
@@ -504,10 +504,10 @@ function buildScene(verts,indices){
 function emitRibbon(arr,o,x,pts,w,closed,maxFloats){
   const n=pts.length/2;
   if(n<2)return o;
+  const H=0.016;  // half-thickness in X (total ~0.032 world units, ~1/3 of w)
   // precompute per-vertex normals (miter)
   const nx=new Float32Array(n), nz=new Float32Array(n);
   for(let i=0;i<n;i++){
-    // direction of incoming and outgoing segments
     let inY=0,inZ=0,outY=0,outZ=0;
     if(i>0||closed){
       const pi=(i-1+n)%n;
@@ -519,13 +519,10 @@ function emitRibbon(arr,o,x,pts,w,closed,maxFloats){
       outY=pts[ni*2]-pts[i*2]; outZ=pts[ni*2+1]-pts[i*2+1];
       const l=Math.hypot(outY,outZ)||1e-6; outY/=l; outZ/=l;
     }
-    // average tangent
     let ty=inY+outY, tz=inZ+outZ;
     const tl=Math.hypot(ty,tz);
     if(tl<1e-4){ty=outY||inY; tz=outZ||inZ;} else {ty/=tl;tz/=tl;}
-    // normal = perp of tangent
     let mnx=-tz, mnz=ty;
-    // miter length compensation
     let miter=1;
     if(tl>=1e-4){
       const ref=(i<n-1||closed)?[outY,outZ]:[inY,inZ];
@@ -534,20 +531,44 @@ function emitRibbon(arr,o,x,pts,w,closed,maxFloats){
     }
     nx[i]=mnx*w*miter; nz[i]=mnz*w*miter;
   }
+  const xF=x+H, xB=x-H;  // front and back X faces
   const segCount=closed?n:n-1;
+  // Each segment needs 4 quads (8 tris = 72 floats) instead of 1 quad (6 verts = 18 floats)
   for(let i=0;i<segCount;i++){
     const j=(i+1)%n;
-    if(o+18>maxFloats)break;
+    if(o+72>maxFloats)break;
     const Ly0=pts[i*2]+nx[i], Lz0=pts[i*2+1]+nz[i];
     const Ry0=pts[i*2]-nx[i], Rz0=pts[i*2+1]-nz[i];
     const Ly1=pts[j*2]+nx[j], Lz1=pts[j*2+1]+nz[j];
     const Ry1=pts[j*2]-nx[j], Rz1=pts[j*2+1]-nz[j];
-    arr[o++]=x;arr[o++]=Ly0;arr[o++]=Lz0;
-    arr[o++]=x;arr[o++]=Ly1;arr[o++]=Lz1;
-    arr[o++]=x;arr[o++]=Ry1;arr[o++]=Rz1;
-    arr[o++]=x;arr[o++]=Ly0;arr[o++]=Lz0;
-    arr[o++]=x;arr[o++]=Ry1;arr[o++]=Rz1;
-    arr[o++]=x;arr[o++]=Ry0;arr[o++]=Rz0;
+    // Front face (x+H)
+    arr[o++]=xF;arr[o++]=Ly0;arr[o++]=Lz0;
+    arr[o++]=xF;arr[o++]=Ly1;arr[o++]=Lz1;
+    arr[o++]=xF;arr[o++]=Ry1;arr[o++]=Rz1;
+    arr[o++]=xF;arr[o++]=Ly0;arr[o++]=Lz0;
+    arr[o++]=xF;arr[o++]=Ry1;arr[o++]=Rz1;
+    arr[o++]=xF;arr[o++]=Ry0;arr[o++]=Rz0;
+    // Back face (x-H)
+    arr[o++]=xB;arr[o++]=Ly0;arr[o++]=Lz0;
+    arr[o++]=xB;arr[o++]=Ry0;arr[o++]=Rz0;
+    arr[o++]=xB;arr[o++]=Ry1;arr[o++]=Rz1;
+    arr[o++]=xB;arr[o++]=Ly0;arr[o++]=Lz0;
+    arr[o++]=xB;arr[o++]=Ry1;arr[o++]=Rz1;
+    arr[o++]=xB;arr[o++]=Ly1;arr[o++]=Lz1;
+    // Left edge (L side, connecting front/back)
+    arr[o++]=xF;arr[o++]=Ly0;arr[o++]=Lz0;
+    arr[o++]=xB;arr[o++]=Ly0;arr[o++]=Lz0;
+    arr[o++]=xB;arr[o++]=Ly1;arr[o++]=Lz1;
+    arr[o++]=xF;arr[o++]=Ly0;arr[o++]=Lz0;
+    arr[o++]=xB;arr[o++]=Ly1;arr[o++]=Lz1;
+    arr[o++]=xF;arr[o++]=Ly1;arr[o++]=Lz1;
+    // Right edge (R side, connecting front/back)
+    arr[o++]=xF;arr[o++]=Ry0;arr[o++]=Rz0;
+    arr[o++]=xB;arr[o++]=Ry1;arr[o++]=Rz1;
+    arr[o++]=xB;arr[o++]=Ry0;arr[o++]=Rz0;
+    arr[o++]=xF;arr[o++]=Ry0;arr[o++]=Rz0;
+    arr[o++]=xF;arr[o++]=Ry1;arr[o++]=Rz1;
+    arr[o++]=xB;arr[o++]=Ry1;arr[o++]=Rz1;
   }
   return o;
 }
