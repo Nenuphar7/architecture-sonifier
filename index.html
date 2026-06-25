@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
 <title>Architecture Sonifier</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/DRACOLoader.js"></script>
 <style>
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
 :root{--ink:#000000;--panel:#0a0a0c;--border:rgba(255,255,255,.09);--accent:#aab0b8;--accent2:#d2d4d8;--muted:#565a60;--text:#c2c4c8;--dim:#7c7f85}
@@ -102,6 +104,21 @@ html,body{height:100%;background:var(--ink);color:var(--text);font-family:system
 .acanvaswrap{position:relative;background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:6px;overflow:hidden}
 .acanvaswrap canvas{display:block;width:100%}
 .acap{position:absolute;top:4px;left:7px;font-size:8px;letter-spacing:.12em;text-transform:uppercase;font-family:monospace;color:var(--muted);pointer-events:none}
+
+/* Model selector + upload controls */
+#model-select{width:100%;margin-top:10px;background:rgba(255,255,255,.04);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:11px;font-family:monospace;
+  outline:none;cursor:pointer}
+#model-select option{background:#0a0a0c;color:var(--text)}
+.mrow{display:flex;gap:6px;margin-top:8px}
+.mbtn{flex:1;background:rgba(170,176,184,.12);color:var(--accent);border:1px solid var(--border);
+  border-radius:6px;padding:6px 4px;font-size:10px;letter-spacing:.06em;font-family:monospace;
+  cursor:pointer;text-transform:uppercase;transition:background .15s}
+.mbtn:hover{background:rgba(170,176,184,.2)}
+.mbtn.ghost{flex:0 0 auto;color:var(--muted)}
+.mbtn:disabled{opacity:.4;cursor:default}
+.mstat{font-size:9px;font-family:monospace;color:var(--dim);margin-top:7px;min-height:11px;line-height:1.5}
+.mstat.err{color:#d98a8a}
 </style>
 </head>
 <body>
@@ -111,13 +128,20 @@ html,body{height:100%;background:var(--ink);color:var(--text);font-family:system
   <div>
     <div class="slabel">Source Model</div>
     <div class="card">
-      <h2>Taj Mahal</h2>
+      <h2 id="model-name">Taj Mahal</h2>
       <div class="meta">
-        vertices <span>11,846</span><br>
+        vertices <span id="model-verts">11,846</span><br>
         <span class="mx">X</span> — time (scan)<br>
         <span class="my">Y</span> — pitch (height)<br>
         <span class="mz">Z</span> — timbre (depth)
       </div>
+      <select id="model-select"></select>
+      <div class="mrow">
+        <button id="upload-btn" class="mbtn">Upload model</button>
+        <button id="delete-btn" class="mbtn ghost" title="Remove this saved model">Delete</button>
+      </div>
+      <input id="model-file" type="file" accept=".glb,.gltf,model/gltf-binary,model/gltf+json" hidden>
+      <div id="model-status" class="mstat"></div>
     </div>
   </div>
   <div>
@@ -304,6 +328,12 @@ function initScene(){
 
   // ── Spectrogram cage: floor + back wall + left wall ──
   buildCage();
+
+  // Neutral lighting so colormap shows true hues, with gentle form shading.
+  // Added once here (not per-model) so switching models doesn't stack lights.
+  scene.add(new THREE.AmbientLight(0xffffff,0.72));
+  const d1=new THREE.DirectionalLight(0xffffff,0.55); d1.position.set(1.2,2.0,1.6); scene.add(d1);
+  const d2=new THREE.DirectionalLight(0xbfd0ff,0.25); d2.position.set(-1.5,0.6,-1.2); scene.add(d2);
 }
 
 // Faint gridded cage that frames the model as a spectrogram volume.
@@ -460,10 +490,6 @@ function buildScene(verts,indices){
   }));
   solidMesh.visible=true;
   scene.add(solidMesh);
-  // Neutral lighting so colormap shows true hues, with gentle form shading
-  scene.add(new THREE.AmbientLight(0xffffff,0.72));
-  const d1=new THREE.DirectionalLight(0xffffff,0.55); d1.position.set(1.2,2.0,1.6); scene.add(d1);
-  const d2=new THREE.DirectionalLight(0xbfd0ff,0.25); d2.position.set(-1.5,0.6,-1.2); scene.add(d2);
 
   // Points (scan shader — no labels, just glow)
   const pgeo=new THREE.BufferGeometry();
@@ -707,13 +733,15 @@ let analyser=null,fftData=null,timeData=null;
 
 async function buildAudio(verts){
   setStatus('synthesizing audio... 0%');
-  audioCtx=new(window.AudioContext||window.webkitAudioContext)({sampleRate:SR});
-  analyser=audioCtx.createAnalyser();
-  analyser.fftSize=2048;
-  analyser.smoothingTimeConstant=0.75;
-  analyser.connect(audioCtx.destination);
-  fftData=new Uint8Array(analyser.frequencyBinCount);
-  timeData=new Uint8Array(analyser.fftSize);
+  if(!audioCtx){
+    audioCtx=new(window.AudioContext||window.webkitAudioContext)({sampleRate:SR});
+    analyser=audioCtx.createAnalyser();
+    analyser.fftSize=2048;
+    analyser.smoothingTimeConstant=0.75;
+    analyser.connect(audioCtx.destination);
+    fftData=new Uint8Array(analyser.frequencyBinCount);
+    timeData=new Uint8Array(analyser.fftSize);
+  }
   const total=Math.round(DURATION*SR);
   const buf=audioCtx.createBuffer(1,total,SR);
   const ch=buf.getChannelData(0);
@@ -979,22 +1007,188 @@ function animate(){
   renderer.render(scene,camera);
 }
 
+// ════════════════════════════════════════════════════════════════
+//  MODEL MANAGEMENT — built-in Taj + user-uploaded GLB/GLTF,
+//  persisted in the browser via IndexedDB.
+// ════════════════════════════════════════════════════════════════
+const TAJ_KEY='__taj__';
+const MAX_TRIS=45000;   // decimate above this so per-frame readout + audio stay smooth
+
+function statusMsg(s,isErr){
+  const el=document.getElementById('model-status');
+  if(!el)return;
+  el.textContent=s||'';
+  el.classList.toggle('err',!!isErr);
+}
+
+// Detach + dispose the current model's scene objects (lights/cage stay).
+function disposeModel(){
+  try{stopAudio();}catch(e){}
+  playing=false;playOff=0;
+  for(const m of [solidMesh,ptsMesh,scanPlane,profileLines,profileGlow]){
+    if(!m)continue;
+    scene.remove(m);
+    if(m.geometry)m.geometry.dispose();
+    if(m.material)m.material.dispose();
+  }
+  solidMesh=ptsMesh=scanPlane=profileLines=profileGlow=null;
+  audioBuf=null;
+}
+
+// Built-in Taj geometry from the embedded base64 buffers.
+function loadTajGeometry(){
+  return {verts:decodeF32(VERTS_B64),indices:decodeU32(IDX_B64),vcount:NV};
+}
+
+// Parse GLB/GLTF bytes → merged, normalized {verts,indices,vcount}.
+function processGLB(arrayBuffer){
+  return new Promise((resolve,reject)=>{
+    const loader=new THREE.GLTFLoader();
+    const draco=new THREE.DRACOLoader();
+    draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+    loader.setDRACOLoader(draco);
+    loader.parse(arrayBuffer,'',
+      gltf=>{ try{resolve(geometryFromGLTF(gltf));}catch(e){reject(e);} },
+      err=>reject(err instanceof Error?err:new Error('parse failed')));
+  });
+}
+
+// Flatten every mesh into one world-space indexed triangle soup, then
+// decimate (if huge) and normalize into the spectrogram cage.
+function geometryFromGLTF(gltf){
+  const root=gltf.scene||(gltf.scenes&&gltf.scenes[0]);
+  if(!root)throw new Error('no scene in file');
+  root.updateMatrixWorld(true);
+  let positions=[],indices=[];
+  const v=new THREE.Vector3();
+  root.traverse(obj=>{
+    if(!obj.isMesh||!obj.geometry)return;
+    const g=obj.geometry,pa=g.attributes.position;
+    if(!pa)return;
+    const base=positions.length/3,m=obj.matrixWorld;
+    for(let i=0;i<pa.count;i++){
+      v.fromBufferAttribute(pa,i).applyMatrix4(m);
+      positions.push(v.x,v.y,v.z);
+    }
+    if(g.index){const ix=g.index;for(let i=0;i<ix.count;i++)indices.push(base+ix.getX(i));}
+    else{for(let i=0;i<pa.count;i++)indices.push(base+i);}
+  });
+  if(indices.length<3)throw new Error('no triangle geometry found');
+
+  // Decimate dense models: keep every Nth triangle, remap used vertices.
+  const tris=indices.length/3;
+  if(tris>MAX_TRIS){
+    const stride=Math.ceil(tris/MAX_TRIS),remap=new Map(),np=[],ni=[];
+    const push=vi=>{let r=remap.get(vi);if(r===undefined){r=np.length/3;remap.set(vi,r);np.push(positions[vi*3],positions[vi*3+1],positions[vi*3+2]);}return r;};
+    for(let t=0;t<tris;t+=stride){const o=t*3;ni.push(push(indices[o]),push(indices[o+1]),push(indices[o+2]));}
+    positions=np;indices=ni;
+  }
+
+  const verts=new Float32Array(positions),idx=new Uint32Array(indices);
+
+  // Center + uniform-scale to fit X[-1,1] · Y[-0.6,0.6] · Z[-1,1] (Y limits, like the Taj).
+  let mnX=1/0,mnY=1/0,mnZ=1/0,mxX=-1/0,mxY=-1/0,mxZ=-1/0;
+  for(let i=0;i<verts.length;i+=3){
+    const x=verts[i],y=verts[i+1],z=verts[i+2];
+    if(x<mnX)mnX=x;if(x>mxX)mxX=x;
+    if(y<mnY)mnY=y;if(y>mxY)mxY=y;
+    if(z<mnZ)mnZ=z;if(z>mxZ)mxZ=z;
+  }
+  const cX=(mnX+mxX)/2,cY=(mnY+mxY)/2,cZ=(mnZ+mxZ)/2;
+  const hX=Math.max((mxX-mnX)/2,1e-6),hY=Math.max((mxY-mnY)/2,1e-6),hZ=Math.max((mxZ-mnZ)/2,1e-6);
+  const s=Math.min(1/hX,0.6/hY,1/hZ);
+  for(let i=0;i<verts.length;i+=3){verts[i]=(verts[i]-cX)*s;verts[i+1]=(verts[i+1]-cY)*s;verts[i+2]=(verts[i+2]-cZ)*s;}
+  return {verts,indices:idx,vcount:verts.length/3};
+}
+
+// Swap in a new model: tear down old, rebuild scene + audio, refresh readout.
+async function setModel(geo,name){
+  disposeModel();
+  cachedVerts=geo.verts;cachedIdx=geo.indices;
+  document.getElementById('model-name').textContent=name;
+  document.getElementById('model-verts').textContent=geo.vcount.toLocaleString();
+  buildScene(geo.verts,geo.indices);
+  setScanX(tToScanX(0));
+  updateReadout(tToScanX(0));
+  setProgress(0);
+  document.getElementById('cur').textContent='0.0 s';
+  if(typeof updBtn==='function')updBtn();
+  await buildAudio(geo.verts);
+}
+
+// ── IndexedDB: persist uploaded GLB bytes across reloads ──
+const DB_NAME='arch-sonifier',STORE='models';
+function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open(DB_NAME,1);r.onupgradeneeded=()=>r.result.createObjectStore(STORE);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
+async function dbPut(k,buf){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(buf,k);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);});}
+async function dbGet(k){const db=await openDB();return new Promise((res,rej)=>{const rq=db.transaction(STORE,'readonly').objectStore(STORE).get(k);rq.onsuccess=()=>res(rq.result);rq.onerror=()=>rej(rq.error);});}
+async function dbKeys(){const db=await openDB();return new Promise((res,rej)=>{const rq=db.transaction(STORE,'readonly').objectStore(STORE).getAllKeys();rq.onsuccess=()=>res(rq.result||[]);rq.onerror=()=>rej(rq.error);});}
+async function dbDel(k){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).delete(k);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);});}
+
+async function refreshSelect(selected){
+  const sel=document.getElementById('model-select');
+  let keys=[];try{keys=await dbKeys();}catch(e){}
+  sel.innerHTML='';
+  const o0=document.createElement('option');o0.value=TAJ_KEY;o0.textContent='Taj Mahal (built-in)';sel.appendChild(o0);
+  for(const k of keys){const o=document.createElement('option');o.value=k;o.textContent=k;sel.appendChild(o);}
+  sel.value=selected||TAJ_KEY;
+  document.getElementById('delete-btn').disabled=(sel.value===TAJ_KEY);
+}
+
+async function selectModel(key){
+  document.getElementById('delete-btn').disabled=(key===TAJ_KEY);
+  if(key===TAJ_KEY){statusMsg('');await setModel(loadTajGeometry(),'Taj Mahal');return;}
+  statusMsg('loading '+key+'…');
+  try{
+    const buf=await dbGet(key);
+    if(!buf)throw new Error('not found in storage');
+    const geo=await processGLB(buf);
+    await setModel(geo,key);
+    statusMsg(geo.vcount.toLocaleString()+' vertices');
+  }catch(e){statusMsg('could not load: '+e.message,true);}
+}
+
+async function handleUpload(file){
+  if(!file)return;
+  const name=file.name.replace(/\.(glb|gltf)$/i,'');
+  statusMsg('processing '+file.name+'…');
+  try{
+    const buf=await file.arrayBuffer();
+    const geo=await processGLB(buf);          // validate before saving
+    await dbPut(name,buf);
+    await refreshSelect(name);
+    await setModel(geo,name);
+    statusMsg('saved · '+geo.vcount.toLocaleString()+' vertices');
+  }catch(e){statusMsg('upload failed: '+e.message,true);}
+}
+
 async function init(){
   try{
     initScene();
+    statusMsg('');
     setStatus('decoding geometry...');
     await new Promise(r=>setTimeout(r,30));
-    const verts=decodeF32(VERTS_B64);
-    const indices=decodeU32(IDX_B64);
-    cachedVerts=verts;cachedIdx=indices;
+    cachedVerts=decodeF32(VERTS_B64);cachedIdx=decodeU32(IDX_B64);
     setStatus('building mesh...');
     await new Promise(r=>setTimeout(r,30));
-    buildScene(verts,indices);
+    buildScene(cachedVerts,cachedIdx);
     setScanX(tToScanX(0));
     updateReadout(tToScanX(0));
     document.getElementById('progress').value=0;
     document.getElementById('cur').textContent='0.0 s';
-    await buildAudio(verts);
+    await buildAudio(cachedVerts);
+
+    // Wire model controls
+    await refreshSelect(TAJ_KEY);
+    document.getElementById('model-select').addEventListener('change',e=>selectModel(e.target.value));
+    document.getElementById('upload-btn').addEventListener('click',()=>document.getElementById('model-file').click());
+    document.getElementById('model-file').addEventListener('change',e=>{handleUpload(e.target.files[0]);e.target.value='';});
+    document.getElementById('delete-btn').addEventListener('click',async()=>{
+      const key=document.getElementById('model-select').value;
+      if(key===TAJ_KEY)return;
+      try{await dbDel(key);await refreshSelect(TAJ_KEY);await selectModel(TAJ_KEY);statusMsg('removed '+key);}
+      catch(e){statusMsg('delete failed: '+e.message,true);}
+    });
+
     document.getElementById('loading').classList.add('hidden');
     setTimeout(()=>{document.getElementById('loading').style.display='none';},800);
     requestAnimationFrame(animate);
