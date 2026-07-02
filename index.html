@@ -709,6 +709,46 @@ function chainSegments(segs){
   }
   return polylines;
 }
+function rev2(p){const r=[];for(let i=p.length-2;i>=0;i-=2)r.push(p[i],p[i+1]);return r;}
+function bridgeChains(polys){
+  // Vertical faces parallel to the cut plane (curb sides, step risers) yield no
+  // intersection segment, so the profile breaks exactly where it should climb.
+  // Join open chain ends that sit at (almost) the same depth z — the ribbon then
+  // draws the missing vertical stroke and the line hugs curbs and stairs.
+  for(let pass=0;pass<3;pass++){
+    const ends=[];
+    for(let i=0;i<polys.length;i++){
+      const p=polys[i];if(!p)continue;
+      ends.push({i,e:0,y:p[0],z:p[1]},{i,e:1,y:p[p.length-2],z:p[p.length-1]});
+    }
+    ends.sort((a,b)=>a.z-b.z);
+    const taken=new Uint8Array(polys.length);
+    let any=false;
+    for(let a=0;a<ends.length;a++){
+      const A=ends[a];if(taken[A.i]||!polys[A.i])continue;
+      let best=-1,bd=1e9;
+      for(let b=a+1;b<ends.length;b++){
+        const B=ends[b];const dz=B.z-A.z;if(dz>0.006)break;
+        if(B.i===A.i||taken[B.i]||!polys[B.i])continue;
+        const dy=Math.abs(B.y-A.y);
+        if(dy>0.12)continue;               // curbs and steps, not building-height leaps
+        const d=dz*3+dy;
+        if(d<bd){bd=d;best=b;}
+      }
+      if(best<0)continue;
+      const B=ends[best];
+      let P=polys[A.i],Q=polys[B.i];
+      if(A.e===0)P=rev2(P);
+      if(B.e===1)Q=rev2(Q);
+      polys[A.i]=P.concat(Q);
+      polys[B.i]=null;
+      taken[A.i]=1;taken[B.i]=1;any=true;
+    }
+    if(!any)break;
+    polys=polys.filter(Boolean);
+  }
+  return polys.filter(Boolean);
+}
 
 // True cross-section + subtract platform-top edge under the building footprint.
 function updateProfile(scanX){
@@ -789,15 +829,20 @@ function updateProfile(scanX){
     segs.push(h);
   }
 
-  const polylines=chainSegments(segs);
+  const chained=chainSegments(segs);
+  // Confetti filter first: isolated fragments shorter than ~2 line-widths read
+  // as a fan of loose strokes, not as contour.
+  const kept=[];
+  for(const pl of chained){
+    let len=0;
+    for(let i=2;i<pl.length;i+=2)len+=Math.hypot(pl[i]-pl[i-2],pl[i+1]-pl[i-1]);
+    if(len>=0.014)kept.push(pl);
+  }
+  // Bridge height jumps so the line climbs over curbs and steps.
+  const polylines=bridgeChains(kept);
   polylines.sort((a,b)=>b.length-a.length);   // draw big contours first; overflow drops specks only
   let o=0;
   for(let pl of polylines){
-    // Confetti filter: isolated fragments shorter than ~2 line-widths read as a
-    // fan of loose strokes, not as contour — skip them entirely.
-    let len=0;
-    for(let i=2;i<pl.length;i+=2)len+=Math.hypot(pl[i]-pl[i-2],pl[i+1]-pl[i-1]);
-    if(len<0.014)continue;
     // Closed loop? Join it seamlessly — no pair of open caps at the seam.
     let closed=false;
     if(pl.length>=8 && Math.hypot(pl[0]-pl[pl.length-2],pl[1]-pl[pl.length-1])<1e-3){
