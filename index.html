@@ -158,6 +158,10 @@ body:fullscreen #fs-btn,body:-webkit-full-screen #fs-btn{top:14px}
     <div class="slabel">Display</div>
     <div class="ctrls">
       <div class="crow">Solid fill<label class="toggle"><input type="checkbox" id="solidT" checked><span class="track"></span></label></div>
+      <div class="crow">Mapping<select id="mode-select" style="max-width:150px">
+        <option value="pitch">Height = pitch</option>
+        <option value="waterfall">Waterfall: height = loudness</option>
+      </select></div>
     </div>
   </div>
   <div>
@@ -420,6 +424,15 @@ function buildCage(){
 }
 
 // Right-side legend ticks: frequency placed at its colour position (log).
+function applyModeLabels(){
+  const wf=(AUDIO_MODE==='waterfall');
+  const p=document.getElementById('ax-pitch'), t=document.getElementById('ax-timbre');
+  if(p)p.textContent=wf?'loudness ↑':'frequency ↑';
+  if(t)t.textContent=wf?'frequency ↗':'timbre ↗';
+  for(const d of freqTickEls)d.style.display=wf?'none':'';   // Y ticks are Hz — wrong in waterfall
+  const cs=document.getElementById('colorscale');
+  if(cs)cs.style.display=wf?'none':'';                       // legend numbers are Hz too
+}
 function buildColorScale(){
   const host=document.getElementById('cs-ticks');
   if(!host)return;
@@ -452,6 +465,7 @@ function buildTickLabels(){
     d.dataset.world=JSON.stringify([xForTime(t),Y_FLOOR,Z_FRONT]);
     vp.appendChild(d); timeTickEls.push(d);
   });
+  if(typeof applyModeLabels==='function')applyModeLabels();
 }
 function addArrow(dir,origin,len,color){
   const mat=new THREE.MeshBasicMaterial({color});
@@ -734,7 +748,9 @@ function updateProfile(scanX){
     const ground=[baseY,-0.6, baseY,0.6];    // [y,z] pairs across depth
     const o=emitRibbon(arr,0,scanX,ground,W,false,maxFloats);
     profileLines.geometry.setDrawRange(0,o/3);
-    profileLines.geometry.attributes.position.needsUpdate=true;
+    const attr0=profileLines.geometry.attributes.position;
+    attr0.updateRange.offset=0; attr0.updateRange.count=o;   // upload only whats used
+    attr0.needsUpdate=true;
     return;
   }
 
@@ -773,7 +789,9 @@ function updateProfile(scanX){
     if(o+18>maxFloats)break;
   }
   profileLines.geometry.setDrawRange(0,o/3);
-  profileLines.geometry.attributes.position.needsUpdate=true;
+  const attr=profileLines.geometry.attributes.position;
+  attr.updateRange.offset=0; attr.updateRange.count=o;       // upload only whats used
+  attr.needsUpdate=true;
 }
 
 function setScanX(x){
@@ -783,6 +801,7 @@ function setScanX(x){
 
 // ── Audio: Y→pitch, Z→timbre (harmonics) ──────────────────────
 let audioCtx=null,audioBuf=null,src=null,ctxT0=0,playOff=0,playing=false;
+let AUDIO_MODE='pitch';   // 'pitch': Y→frequency, Z→timbre | 'waterfall': Z→frequency, height→loudness
 let analyser=null,fftData=null,timeData=null;
 
 async function buildAudio(verts){
@@ -796,6 +815,10 @@ async function buildAudio(verts){
     fftData=new Uint8Array(analyser.frequencyBinCount);
     timeData=new Uint8Array(analyser.fftSize);
   }
+  // model depth extent — the frequency axis in waterfall mode
+  let zMin=1e9,zMax=-1e9;
+  for(let i=2;i<verts.length;i+=3){const z=verts[i];if(z<zMin)zMin=z;if(z>zMax)zMax=z;}
+  if(zMax-zMin<1e-6){zMin=-1;zMax=1;}
   const total=Math.round(DURATION*SR);
   const buf=audioCtx.createBuffer(1,total,SR);
   const ch=buf.getChannelData(0);
@@ -824,6 +847,32 @@ async function buildAudio(verts){
           if(n===2)pts.push({y:(y0+y1)*0.5,z:(z0+z1)*0.5});
         }
         if(!pts.length)continue;
+        if(AUDIO_MODE==='waterfall'){
+          // Honest waterfall: depth (Z) → frequency bins (log), building height → loudness.
+          // The skyline of the slice IS the spectrum at this moment. Pure sines — the
+          // spectrum is given directly, timbre emerges from the mix itself.
+          const NB=96;
+          const amps=new Float32Array(NB);
+          for(const p of pts){
+            let zn=(p.z-zMin)/(zMax-zMin); if(!(zn>=0))zn=0; else if(zn>1)zn=1;
+            const b=Math.min(NB-1,(zn*NB)|0);
+            const hn=(p.y-Y_BOT)/(Y_TOP-Y_BOT);
+            if(hn>amps[b])amps[b]=hn;
+          }
+          for(let b=0;b<NB;b++){
+            const a0=amps[b]; if(a0<=0.004)continue;
+            const freq=F_MIN*Math.pow(F_MAX/F_MIN,(b+0.5)/NB);
+            const amp=0.05*Math.pow(a0,1.7);   // gamma for contrast between low + tall
+            const ph=(2*Math.PI*freq)/SR;
+            for(let j=-stepS;j<stepS;j++){
+              const idx=t0+j;
+              if(idx<0||idx>=total)continue;
+              const env=1-Math.abs(j)/stepS;
+              ch[idx]+=amp*env*Math.sin(ph*idx);
+            }
+          }
+          continue;
+        }
         // cap synthesis cost: stride-sample dense slices down to ~280 points
         let use=pts;
         if(pts.length>280){
@@ -926,6 +975,15 @@ document.getElementById('progress').addEventListener('input',e=>{
   if(playing)playFrom(t);
 });
 document.getElementById('solidT').addEventListener('change',e=>{if(solidMesh)solidMesh.visible=e.target.checked;});
+document.getElementById('mode-select').addEventListener('change',async e=>{
+  AUDIO_MODE=e.target.value;
+  applyModeLabels();
+  try{stopAudio();}catch(_){}
+  playing=false;playOff=0;setProgress(0);
+  document.getElementById('cur').textContent='0.0 s';
+  if(typeof updBtn==='function')updBtn();
+  if(cachedVerts)await buildAudio(cachedVerts);   // same building, re-read as a waterfall
+});
 
 // Fullscreen toggle (hides browser chrome). Uses standard + webkit fallback for Safari.
 (function(){
