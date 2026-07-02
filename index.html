@@ -113,12 +113,12 @@ body:fullscreen #fs-btn,body:-webkit-full-screen #fs-btn{top:14px}
   border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:11px;font-family:monospace;
   outline:none;cursor:pointer}
 #model-select option{background:#0a0a0c;color:var(--text)}
-#mode-select{width:100%;margin-top:5px;background:rgba(255,255,255,.04);color:var(--text);
+#mode-select,#width-select{width:100%;margin-top:5px;background:rgba(255,255,255,.04);color:var(--text);
   border:1px solid var(--border);border-radius:6px;padding:6px 26px 6px 8px;font-size:11px;font-family:monospace;
   outline:none;cursor:pointer;-webkit-appearance:none;appearance:none;
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M1 1l4 4 4-4' stroke='%23aab0b8' stroke-width='1.4' fill='none'/></svg>");
   background-repeat:no-repeat;background-position:right 8px center}
-#mode-select option{background:#0a0a0c;color:var(--text)}
+#mode-select option,#width-select option{background:#0a0a0c;color:var(--text)}
 .mrow{display:flex;gap:6px;margin-top:8px}
 .mbtn{flex:1;background:rgba(170,176,184,.12);color:var(--accent);border:1px solid var(--border);
   border-radius:6px;padding:6px 4px;font-size:10px;letter-spacing:.06em;font-family:monospace;
@@ -168,6 +168,12 @@ body:fullscreen #fs-btn,body:-webkit-full-screen #fs-btn{top:14px}
       <select id="mode-select">
         <option value="pitch">Height = pitch</option>
         <option value="waterfall">Waterfall: height = loudness</option>
+      </select>
+      <div class="crow" style="margin-top:8px">Section line</div>
+      <select id="width-select">
+        <option value="0.0066">Normal</option>
+        <option value="0.0033">Thin (½)</option>
+        <option value="0.0022">Hairline (⅓)</option>
       </select>
     </div>
   </div>
@@ -763,7 +769,7 @@ function updateProfile(scanX){
   const V=cachedVerts,I=cachedIdx;
   const arr=profileLines.geometry.attributes.position.array;
   const maxFloats=arr.length;
-  const W=0.0066, MINLEN=0.0012; // slim profile line; low junk threshold keeps fine ornament
+  const W=PROFILE_W, MINLEN=0.0012; // width is user-selectable; low junk threshold keeps fine ornament
 
   // pass 1: collect all segments + find vertical extent
   const raw=[];
@@ -881,7 +887,8 @@ function setScanX(x){
 
 // ── Audio: Y→pitch, Z→timbre (harmonics) ──────────────────────
 let audioCtx=null,audioBuf=null,src=null,ctxT0=0,playOff=0,playing=false;
-let AUDIO_MODE='pitch';   // 'pitch': Y→frequency, Z→timbre | 'waterfall': Z→frequency, height→loudness
+let AUDIO_MODE='pitch';
+let PROFILE_W=0.0066;   // section line half-width; UI: Normal / Thin / Hairline   // 'pitch': Y→frequency, Z→timbre | 'waterfall': Z→frequency, height→loudness
 let analyser=null,fftData=null,timeData=null;
 
 async function buildAudio(verts){
@@ -1055,6 +1062,10 @@ document.getElementById('progress').addEventListener('input',e=>{
   if(playing)playFrom(t);
 });
 document.getElementById('solidT').addEventListener('change',e=>{if(solidMesh)solidMesh.visible=e.target.checked;});
+document.getElementById('width-select').addEventListener('change',e=>{
+  PROFILE_W=parseFloat(e.target.value);
+  if(cachedVerts)updateProfile(scanU.value);   // redraw immediately, no audio rebuild
+});
 document.getElementById('mode-select').addEventListener('change',async e=>{
   AUDIO_MODE=e.target.value;
   applyModeLabels();
