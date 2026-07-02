@@ -579,11 +579,12 @@ function buildScene(verts,indices){
 
   // Profile — true cross-section as THICK ribbon (quads in the Y-Z plane)
   const profGeo=new THREE.BufferGeometry();
-  const maxSeg=24000;              // segments — detailed models (Sagrada) slice into tens of thousands
+  const maxSeg=32000;              // segments — detailed models (Sagrada) slice into tens of thousands
   profGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(maxSeg*24*3),3)); // 8 tris/seg (4 quads)
   profGeo.setDrawRange(0,0);
   profileLines=new THREE.Mesh(profGeo,new THREE.MeshBasicMaterial({
-    color:0xffffff,side:THREE.DoubleSide,depthWrite:true,depthTest:true
+    color:0xffffff,side:THREE.DoubleSide,depthWrite:false,depthTest:false,
+    transparent:true,opacity:0.92
   }));
   profileLines.renderOrder=999;
   scene.add(profileLines);
@@ -668,7 +669,7 @@ function emitRibbon(arr,o,x,pts,w,closed,maxFloats){
 
 // Chain raw cross-section segments into continuous polylines by shared endpoints.
 function chainSegments(segs){
-  const Q=1e4;
+  const Q=2e3;   // 5e-4 tolerance — bridges seams between topologically separate surfaces
   const key=(y,z)=>Math.round(y*Q)+','+Math.round(z*Q);
   const adj=new Map();
   for(let i=0;i<segs.length;i++){
@@ -715,7 +716,7 @@ function updateProfile(scanX){
   const V=cachedVerts,I=cachedIdx;
   const arr=profileLines.geometry.attributes.position.array;
   const maxFloats=arr.length;
-  const W=0.010, MINLEN=0.004;  // slim profile line — detailed models read as a clean contour
+  const W=0.010, MINLEN=0.0012; // slim profile line; low junk threshold keeps fine ornament
 
   // pass 1: collect all segments + find vertical extent
   const raw=[];
