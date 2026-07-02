@@ -113,6 +113,12 @@ body:fullscreen #fs-btn,body:-webkit-full-screen #fs-btn{top:14px}
   border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:11px;font-family:monospace;
   outline:none;cursor:pointer}
 #model-select option{background:#0a0a0c;color:var(--text)}
+#mode-select{width:100%;margin-top:5px;background:rgba(255,255,255,.04);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:6px 26px 6px 8px;font-size:11px;font-family:monospace;
+  outline:none;cursor:pointer;-webkit-appearance:none;appearance:none;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M1 1l4 4 4-4' stroke='%23aab0b8' stroke-width='1.4' fill='none'/></svg>");
+  background-repeat:no-repeat;background-position:right 8px center}
+#mode-select option{background:#0a0a0c;color:var(--text)}
 .mrow{display:flex;gap:6px;margin-top:8px}
 .mbtn{flex:1;background:rgba(170,176,184,.12);color:var(--accent);border:1px solid var(--border);
   border-radius:6px;padding:6px 4px;font-size:10px;letter-spacing:.06em;font-family:monospace;
@@ -158,10 +164,11 @@ body:fullscreen #fs-btn,body:-webkit-full-screen #fs-btn{top:14px}
     <div class="slabel">Display</div>
     <div class="ctrls">
       <div class="crow">Solid fill<label class="toggle"><input type="checkbox" id="solidT" checked><span class="track"></span></label></div>
-      <div class="crow">Mapping<select id="mode-select" style="max-width:150px">
+      <div class="crow" style="margin-top:8px">Mapping</div>
+      <select id="mode-select">
         <option value="pitch">Height = pitch</option>
         <option value="waterfall">Waterfall: height = loudness</option>
-      </select></div>
+      </select>
     </div>
   </div>
   <div>
