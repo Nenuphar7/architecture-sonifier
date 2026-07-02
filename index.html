@@ -583,8 +583,8 @@ function buildScene(verts,indices){
   profGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(maxSeg*24*3),3)); // 8 tris/seg (4 quads)
   profGeo.setDrawRange(0,0);
   profileLines=new THREE.Mesh(profGeo,new THREE.MeshBasicMaterial({
-    color:0xffffff,side:THREE.DoubleSide,depthWrite:false,depthTest:false,
-    transparent:true,opacity:0.92
+    color:0xffffff,side:THREE.DoubleSide,depthWrite:true,depthTest:true,
+    polygonOffset:true,polygonOffsetFactor:-4,polygonOffsetUnits:-4
   }));
   profileLines.renderOrder=999;
   scene.add(profileLines);
@@ -598,7 +598,7 @@ function buildScene(verts,indices){
 function emitRibbon(arr,o,x,pts,w,closed,maxFloats){
   const n=pts.length/2;
   if(n<2)return o;
-  const H=0.0028;  // half-thickness in X (slimmed with the ribbon width)
+  const H=0.005;   // half-thickness in X — proud of the surface so the wall can't swallow it
   // precompute per-vertex normals (miter)
   const nx=new Float32Array(n), nz=new Float32Array(n);
   for(let i=0;i<n;i++){
