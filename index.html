@@ -565,7 +565,7 @@ function buildScene(verts,indices){
 
   // Profile — true cross-section as THICK ribbon (quads in the Y-Z plane)
   const profGeo=new THREE.BufferGeometry();
-  const maxSeg=4000;               // segments
+  const maxSeg=24000;              // segments — detailed models (Sagrada) slice into tens of thousands
   profGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(maxSeg*24*3),3)); // 8 tris/seg (4 quads)
   profGeo.setDrawRange(0,0);
   profileLines=new THREE.Mesh(profGeo,new THREE.MeshBasicMaterial({
@@ -766,6 +766,7 @@ function updateProfile(scanX){
   }
 
   const polylines=chainSegments(segs);
+  polylines.sort((a,b)=>b.length-a.length);   // draw big contours first; overflow drops specks only
   let o=0;
   for(const pl of polylines){
     o=emitRibbon(arr,o,scanX,pl,W,false,maxFloats);
