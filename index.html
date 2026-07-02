@@ -232,8 +232,8 @@ void main(){
   vColor=mix(vColor,cp,edge);
   vAlpha=clamp(0.95*aura+edge, 0.0, 1.0);
   vec4 mv=modelViewMatrix*vec4(position,1.0);
-  float ps=(1.0+6.5*edge+1.2*aura)*260.0/(-mv.z);
-  gl_PointSize=clamp(ps,0.3,10.0);
+  float ps=(1.0+2.75*edge+0.6*aura)*260.0/(-mv.z);   // lit points at half their former size
+  gl_PointSize=clamp(ps,0.3,5.0);
   gl_Position=projectionMatrix*mv;
 }
 </script>
