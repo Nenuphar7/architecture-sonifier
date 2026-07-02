@@ -732,6 +732,13 @@ function updateProfile(scanX){
     if((db<0)!==(dc<0)){const s=db/(db-dc);hits.push(by+s*(cy-by),bz+s*(cz-bz));}
     if((dc<0)!==(da<0)){const s=dc/(dc-da);hits.push(cy+s*(ay-cy),cz+s*(az-cz));}
     if(hits.length===4){
+      // Skip triangles nearly parallel to the cut plane: the plane grazes them
+      // tangentially and the "contour" degenerates into an unstable smear of
+      // fragments across the whole face. A transversal cut has |nx| well below 1.
+      const ux=bx-ax,uy=by-ay,uz=bz-az, vx=cx-ax,vy=cy-ay,vz=cz-az;
+      const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+      const n2=nx*nx+ny*ny+nz*nz;
+      if(n2>0 && (nx*nx)/n2>0.92)continue;   // ~>73° tilt toward the plane → grazing
       const dy=hits[2]-hits[0], dz=hits[3]-hits[1];
       if(Math.hypot(dy,dz)>=MINLEN){
         raw.push(hits);
