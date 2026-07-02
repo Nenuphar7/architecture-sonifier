@@ -343,6 +343,21 @@ let solidMesh,profileLines,profileGlow,cachedVerts=null,cachedIdx=null;
 let isDragging=false,prev={x:0,y:0};
 let pinchDist=0;
 let sph={theta:0.22,phi:1.05,r:3.8};
+const camTarget=new THREE.Vector3(0,0,0);   // pan moves this; camera orbits around it
+let isPanning=false, prevMid={x:0,y:0}, lastTap=0;
+function panBy(dx,dy){
+  // move the orbit target in screen space (camera right/up), speed scales with distance
+  const e=camera.matrix.elements;
+  const k=0.0012*sph.r;
+  camTarget.x+=(-dx*e[0]+dy*e[4])*k;
+  camTarget.y+=(-dx*e[1]+dy*e[5])*k;
+  camTarget.z+=(-dx*e[2]+dy*e[6])*k;
+  const L=4; // keep the scene reachable
+  camTarget.x=Math.max(-L,Math.min(L,camTarget.x));
+  camTarget.y=Math.max(-L,Math.min(L,camTarget.y));
+  camTarget.z=Math.max(-L,Math.min(L,camTarget.z));
+}
+function resetView(){camTarget.set(0,0,0);sph={theta:0.22,phi:1.05,r:3.8};updateCam();}
 
 function initScene(){
   scene=new THREE.Scene();
@@ -462,8 +477,11 @@ function addArrow(dir,origin,len,color){
 }
 function updateCam(){
   const{theta,phi,r}=sph;
-  camera.position.set(r*Math.sin(phi)*Math.sin(theta),r*Math.cos(phi),r*Math.sin(phi)*Math.cos(theta));
-  camera.lookAt(0,0,0);
+  camera.position.set(
+    camTarget.x+r*Math.sin(phi)*Math.sin(theta),
+    camTarget.y+r*Math.cos(phi),
+    camTarget.z+r*Math.sin(phi)*Math.cos(theta));
+  camera.lookAt(camTarget);
 }
 
 // Project 3D world pos → 2D screen px (relative to viewport)
@@ -1015,14 +1033,20 @@ function drawScope(){
 
 
 const vp=document.getElementById('viewport');
-vp.addEventListener('mousedown',e=>{isDragging=true;prev={x:e.clientX,y:e.clientY};});
+vp.addEventListener('mousedown',e=>{
+  if(e.button===2||e.shiftKey){isPanning=true;}else{isDragging=true;}
+  prev={x:e.clientX,y:e.clientY};
+});
+vp.addEventListener('contextmenu',e=>e.preventDefault());
+vp.addEventListener('dblclick',resetView);
 document.addEventListener('mousemove',e=>{
+  if(isPanning){panBy(e.clientX-prev.x,e.clientY-prev.y);prev={x:e.clientX,y:e.clientY};updateCam();return;}
   if(!isDragging)return;
   sph.theta-=(e.clientX-prev.x)*0.006;
   sph.phi=Math.max(0.08,Math.min(Math.PI*0.92,sph.phi+(e.clientY-prev.y)*0.006));
   updateCam();prev={x:e.clientX,y:e.clientY};
 });
-document.addEventListener('mouseup',()=>{isDragging=false;});
+document.addEventListener('mouseup',()=>{isDragging=false;isPanning=false;});
 vp.addEventListener('wheel',e=>{
   e.preventDefault();sph.r=Math.max(0.8,Math.min(10,sph.r+e.deltaY*0.005));updateCam();
 },{passive:false});
@@ -1033,8 +1057,15 @@ const cvs=document.getElementById('canvas');
 function touchDist(t){return Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY);}
 cvs.addEventListener('touchstart',e=>{
   e.preventDefault();
-  if(e.touches.length===1){isDragging=true;prev={x:e.touches[0].clientX,y:e.touches[0].clientY};}
-  else if(e.touches.length===2){isDragging=false;pinchDist=touchDist(e.touches);}
+  if(e.touches.length===1){
+    const now=Date.now();
+    if(now-lastTap<300){resetView();lastTap=0;}else{lastTap=now;}
+    isDragging=true;prev={x:e.touches[0].clientX,y:e.touches[0].clientY};
+  }
+  else if(e.touches.length===2){
+    isDragging=false;pinchDist=touchDist(e.touches);
+    prevMid={x:(e.touches[0].clientX+e.touches[1].clientX)/2,y:(e.touches[0].clientY+e.touches[1].clientY)/2};
+  }
 },{passive:false});
 cvs.addEventListener('touchmove',e=>{
   e.preventDefault();
@@ -1045,8 +1076,12 @@ cvs.addEventListener('touchmove',e=>{
     updateCam();prev={x,y};
   }else if(e.touches.length===2){
     const d=touchDist(e.touches);
-    if(pinchDist>0){sph.r=Math.max(0.8,Math.min(10,sph.r*(pinchDist/d)));updateCam();}
+    if(pinchDist>0){sph.r=Math.max(0.8,Math.min(10,sph.r*(pinchDist/d)));}
     pinchDist=d;
+    const mid={x:(e.touches[0].clientX+e.touches[1].clientX)/2,y:(e.touches[0].clientY+e.touches[1].clientY)/2};
+    panBy(mid.x-prevMid.x,mid.y-prevMid.y);
+    prevMid=mid;
+    updateCam();
   }
 },{passive:false});
 cvs.addEventListener('touchend',e=>{
